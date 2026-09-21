@@ -23,7 +23,7 @@ export const getCentreById = async (req, res) => {
     const pool = await poolPromise;
     const result = await pool.request()
       .input("id", id)
-      .query("SELECT * FROM [CRM].[dbo].[Centres] WHERE id = @id");
+      .query("SELECT * FROM [ImmigrationCRM].[dbo].[Centres] WHERE id = @id");
 
     if (result.recordset.length === 0) {
       return res.status(404).json({ message: "Centre not found" });
@@ -45,7 +45,7 @@ export const getCentreByCode = async (req, res) => {
     const pool = await poolPromise;
     const result = await pool.request()
       .input("code", code)
-      .query("SELECT * FROM [CRM].[dbo].[Centres] WHERE centre_code = @code");
+      .query("SELECT * FROM [ImmigrationCRM].[dbo].[Centres] WHERE centre_code = @code");
 
     if (result.recordset.length === 0) {
       return res.status(404).json({ message: "Centre not found" });
@@ -141,7 +141,7 @@ export const updateCentre = async (req, res) => {
     // Check if centre exists
     const existing = await pool.request()
       .input("id", id)
-      .query("SELECT * FROM [CRM].[dbo].[Centres] WHERE id = @id");
+      .query("SELECT * FROM [ImmigrationCRM].[dbo].[Centres] WHERE id = @id");
 
     if (existing.recordset.length === 0) {
       return res.status(404).json({ message: "Centre not found" });
@@ -151,7 +151,7 @@ export const updateCentre = async (req, res) => {
     if (updates.centre_code && updates.centre_code !== existing.recordset[0].centre_code) {
       const codeExists = await pool.request()
         .input("code", updates.centre_code)
-        .query("SELECT id FROM [CRM].[dbo].[Centres] WHERE centre_code = @code AND id != @id")
+        .query("SELECT id FROM [ImmigrationCRM].[dbo].[Centres] WHERE centre_code = @code AND id != @id")
         .input("id", id);
       
       if (codeExists.recordset.length > 0) {
