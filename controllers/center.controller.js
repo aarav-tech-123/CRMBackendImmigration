@@ -6,7 +6,7 @@ export const getAllCentres = async (req, res) => {
   try {
     const pool = await poolPromise;
     const result = await pool.request()
-      .query("SELECT * FROM [CRM].[dbo].[Centres] ORDER BY created_at DESC");
+      .query("SELECT * FROM [ImmigrationCRM].[dbo].[Centres] ORDER BY created_at DESC");
     res.json(result.recordset);
   } catch (err) {
     console.error("Get All Centres Error:", err);
