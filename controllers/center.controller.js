@@ -1,15 +1,7 @@
 import { poolPromise } from "../config/db.js";
 
-/**
- * @swagger
- * /centres:
- *   get:
- *     summary: Get all centres
- *     tags: [Centres]
- *     responses:
- *       200:
- *         description: List of centres
- */
+
+
 export const getAllCentres = async (req, res) => {
   try {
     const pool = await poolPromise;
@@ -22,24 +14,9 @@ export const getAllCentres = async (req, res) => {
   }
 };
 
-/**
- * @swagger
- * /centres/{id}:
- *   get:
- *     summary: Get centre by ID
- *     tags: [Centres]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Centre details
- *       404:
- *         description: Centre not found
- */
+
+
+
 export const getCentreById = async (req, res) => {
   const { id } = req.params;
   try {
@@ -59,24 +36,9 @@ export const getCentreById = async (req, res) => {
   }
 };
 
-/**
- * @swagger
- * /centres/code/{code}:
- *   get:
- *     summary: Get centre by code
- *     tags: [Centres]
- *     parameters:
- *       - in: path
- *         name: code
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Centre details
- *       404:
- *         description: Centre not found
- */
+
+
+
 export const getCentreByCode = async (req, res) => {
   const { code } = req.params;
   try {
@@ -96,51 +58,9 @@ export const getCentreByCode = async (req, res) => {
   }
 };
 
-/**
- * @swagger
- * /centres:
- *   post:
- *     summary: Create a new centre
- *     tags: [Centres]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               centre_name:
- *                 type: string
- *               centre_code:
- *                 type: string
- *               description:
- *                 type: string
- *               email:
- *                 type: string
- *               phone:
- *                 type: string
- *               address_line1:
- *                 type: string
- *               address_line2:
- *                 type: string
- *               city:
- *                 type: string
- *               state:
- *                 type: string
- *               country:
- *                 type: string
- *               pincode:
- *                 type: string
- *               is_active:
- *                 type: boolean
- *             required:
- *               - centre_name
- *               - centre_code
- *               - email
- *     responses:
- *       201:
- *         description: Centre created successfully
- */
+
+
+
 export const createCentre = async (req, res) => {
   const {
     centre_name,
@@ -167,7 +87,8 @@ export const createCentre = async (req, res) => {
     // Check if centre_code already exists
     const existingCode = await pool.request()
       .input("code", centre_code)
-      .query("SELECT id FROM [CRM].[dbo].[Centres] WHERE centre_code = @code");
+      .query("SELECT id FROM Centres WHERE centre_code = @code");
+
     
     if (existingCode.recordset.length > 0) {
       return res.status(400).json({ message: "Centre code already exists" });
@@ -187,7 +108,7 @@ export const createCentre = async (req, res) => {
       .input("pincode", pincode || null)
       .input("is_active", is_active)
       .query(`
-        INSERT INTO [CRM].[dbo].[Centres] (
+        INSERT INTO Centres (
           centre_name, centre_code, description, email, phone,
           address_line1, address_line2, city, state, country, pincode, is_active
         ) OUTPUT INSERTED.* 
@@ -207,50 +128,9 @@ export const createCentre = async (req, res) => {
   }
 };
 
-/**
- * @swagger
- * /centres/{id}:
- *   put:
- *     summary: Update centre by ID
- *     tags: [Centres]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               centre_name:
- *                 type: string
- *               centre_code:
- *                 type: string
- *               description:
- *                 type: string
- *               email:
- *                 type: string
- *               phone:
- *                 type: string
- *               address_line1:
- *                 type: string
- *               address_line2:
- *                 type: string
- *               city:
- *                 type: string
- *               state:
- *                 type: string
- *               country:
- *                 type: string
- *               pincode:
- *                 type: string
- *               is_active:
- *                 type: boolean
- */
+
+
+
 export const updateCentre = async (req, res) => {
   const { id } = req.params;
   const updates = req.body;
@@ -326,19 +206,9 @@ export const updateCentre = async (req, res) => {
   }
 };
 
-/**
- * @swagger
- * /centres/{id}:
- *   delete:
- *     summary: Soft delete centre by ID (set is_active = 0)
- *     tags: [Centres]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- */
+
+
+
 export const deleteCentre = async (req, res) => {
   const { id } = req.params;
   try {

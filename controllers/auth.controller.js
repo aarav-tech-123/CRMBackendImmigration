@@ -6,37 +6,7 @@ import { poolPromise } from "../config/db.js";
 import dotenv from "dotenv";
 dotenv.config();
 
-/**
- * @swagger
- * /auth/users:
- *   get:
- *     summary: Get all users
- *     tags: [Auth]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: List of users
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: integer
- *                   name:
- *                     type: string
- *                   email:
- *                     type: string
- *                   role:
- *                     type: string
- *       401:
- *         description: Unauthorized
- *       500:
- *         description: Server error
- */
+
 export const getUser = async (req, res) => {
   try {
     const pool = await poolPromise;
@@ -48,48 +18,8 @@ export const getUser = async (req, res) => {
   }
 };
 
-/**
- * @swagger
- * /auth/register:
- *   post:
- *     summary: Register a new user
- *     tags: [Auth]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - name
- *               - email
- *               - password
- *               - role
- *             properties:
- *               name:
- *                 type: string
- *                 minLength: 2
- *                 maxLength: 50
- *               email:
- *                 type: string
- *                 format: email
- *               password:
- *                 type: string
- *                 minLength: 6
- *               role:
- *                 type: string
- *     responses:
- *       200:
- *         description: User registered successfully
- *       400:
- *         description: Validation error
- *       401:
- *         description: Unauthorized
- *       500:
- *         description: Server error
- */
+
+
 export const register = async (req, res) => {
   const { name, email, password, role, center_code } = req.body;
 
@@ -146,44 +76,8 @@ export const register = async (req, res) => {
   }
 };
 
-/**
- * @swagger
- * /auth/login:
- *   post:
- *     summary: Login user
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *               - password
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *               password:
- *                 type: string
- *     responses:
- *       200:
- *         description: Login successful
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 token:
- *                   type: string
- *                 user:
- *                   type: object
- *       400:
- *         description: Invalid credentials
- *       500:
- *         description: Server error
- */
+
+
 export const login = async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -214,32 +108,9 @@ export const login = async (req, res) => {
 
 const otpExpiryMinutes = 5 // OTP valid for 10 minutes
 
-/**
- * @swagger
- * /auth/forget-password:
- *   post:
- *     summary: Send OTP for password reset
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *     responses:
- *       200:
- *         description: OTP sent to email
- *       400:
- *         description: Email not registered
- *       500:
- *         description: Server error
- */
+
+
+
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;
 
