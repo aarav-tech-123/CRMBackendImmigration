@@ -84,7 +84,8 @@ export const login = async (req, res) => {
     const pool = await poolPromise;
     const result = await pool.request()
       .input("email", email)
-      .query("SELECT id, name, email, role, center_code FROM Users WHERE email = @email");
+      .query("SELECT * FROM Users WHERE email = @email");
+
 
     const user = result.recordset[0];
     if (!user) return res.status(400).json({ message: "Invalid credentials" });
