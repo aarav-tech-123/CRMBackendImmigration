@@ -1230,7 +1230,7 @@ export const searchSuperAdminLeads = async (req, res, next) => {
                 L.remark,
                 L.created_at,
                 L.updated_at
-            FROM Leads
+            FROM Leads AS L
             LEFT JOIN LeadStatuses LS
                 ON L.lead_status = LS.id
             WHERE
@@ -1360,7 +1360,7 @@ export const filterSuperAdminLeads = async (req, res, next) => {
                 L.remark,
                 L.created_at,
                 L.updated_at
-            FROM Leads
+            FROM Leads AS L
             LEFT JOIN LeadStatuses LS
                 ON L.lead_status = LS.id
             WHERE
