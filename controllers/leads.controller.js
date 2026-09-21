@@ -1223,7 +1223,7 @@ export const searchSuperAdminLeads = async (req, res, next) => {
                 L.alt_email,
                 L.source,
                 L.lead_status,
-                LS.lead_status_name
+                LS.status_name,
                 L.center_code,
                 L.assigned_to,
                 L.is_converted,
@@ -1353,7 +1353,7 @@ export const filterSuperAdminLeads = async (req, res, next) => {
                 L.alt_email,
                 L.source,
                 L.lead_status,
-                LS.lead_status_name
+                LS.status_name,
                 L.center_code,
                 L.assigned_to,
                 L.is_converted,
