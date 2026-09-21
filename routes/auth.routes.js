@@ -4,7 +4,7 @@ import { verifyToken, authorize } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
-router.post("/register", register);
+router.post("/register", verifyToken, authorize(["Admin", "SuperAdmin"]), register);
 router.post("/login", login);
 router.post("/forget-password", forgotPassword);
 router.post("/reset-password", resetPassword);
