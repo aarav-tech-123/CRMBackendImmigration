@@ -38,3 +38,19 @@ export const uploadCaseDocument = multer({
 // Path stored in the DB / served over HTTP, relative to the uploads static root.
 export const relativeUploadPath = (filename) => `case-documents/${filename}`;
 export const absoluteUploadPath = (filename) => path.join(CASE_DOCUMENTS_DIR, filename);
+
+// Lead bulk-import spreadsheets: parsed in memory, never written to disk.
+const LEAD_IMPORT_EXTENSIONS = new Set([".xlsx", ".xls", ".csv"]);
+const MAX_LEAD_IMPORT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+
+export const uploadLeadImportFile = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!LEAD_IMPORT_EXTENSIONS.has(ext)) {
+      return cb(new Error(`Unsupported file type "${ext}". Allowed: ${[...LEAD_IMPORT_EXTENSIONS].join(", ")}`));
+    }
+    cb(null, true);
+  },
+  limits: { fileSize: MAX_LEAD_IMPORT_SIZE_BYTES },
+});

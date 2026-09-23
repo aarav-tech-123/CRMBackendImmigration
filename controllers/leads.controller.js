@@ -261,6 +261,20 @@ export const createLead = async (req, res, next) => {
         );
 
         request.input(
+            'is_connected',
+            sql.Bit,
+            0
+        );
+
+        request.input(
+            'english_proficiency_level',
+            sql.NVarChar(50),
+            data.english_proficiency_level
+                ? String(data.english_proficiency_level).trim()
+                : null
+        );
+
+        request.input(
             'remark',
             sql.NVarChar(sql.MAX),
             data.remark
@@ -283,6 +297,8 @@ export const createLead = async (req, res, next) => {
                 center_code,
                 assigned_to,
                 is_converted,
+                is_connected,
+                english_proficiency_level,
                 remark,
                 created_at,
                 updated_at
@@ -305,6 +321,8 @@ export const createLead = async (req, res, next) => {
                 @center_code,
                 @assigned_to,
                 @is_converted,
+                @is_connected,
+                @english_proficiency_level,
                 @remark,
                 GETDATE(),
                 GETDATE()
@@ -584,6 +602,8 @@ export const getAllLeads = async (req, res, next) => {
                 L.is_converted,
                 L.remark,
                 L.created_at,
+                L.english_proficiency_level,
+                L.is_connected,
                 L.updated_at
 
             ${baseQuery}
@@ -1228,6 +1248,8 @@ export const searchSuperAdminLeads = async (req, res, next) => {
                 L.assigned_to,
                 L.is_converted,
                 L.remark,
+                L.english_proficiency_level,
+                L.is_connected,
                 L.created_at,
                 L.updated_at
             FROM Leads AS L
@@ -1358,6 +1380,8 @@ export const filterSuperAdminLeads = async (req, res, next) => {
                 L.assigned_to,
                 L.is_converted,
                 L.remark,
+                L.english_proficiency_level,
+                L.is_connected,
                 L.created_at,
                 L.updated_at
             FROM Leads AS L
@@ -1470,6 +1494,9 @@ export const getLeadById = async (req, res, next) => {
 
                     L.remark,
 
+                    L.english_proficiency_level,
+                    L.is_connected,
+
                     L.created_at,
                     L.updated_at
 
@@ -1546,7 +1573,9 @@ export const updateLead = async (req, res, next) => {
             source: sql.NVarChar(150),
             center_code: sql.NVarChar(50),
             remark: sql.NVarChar(sql.MAX),
-            is_converted: sql.Bit
+            is_converted: sql.Bit,
+            is_connected: sql.Bit,
+            english_proficiency_level: sql.NVarChar(50)
         };
 
         // Readable field names for ActivityLogs
@@ -1562,6 +1591,8 @@ export const updateLead = async (req, res, next) => {
             center_code: 'Center Code',
             remark: 'Remark',
             is_converted: 'Converted',
+            is_connected: 'Connected',
+            english_proficiency_level: 'English Proficiency Level',
             full_name: 'Full Name'
         };
 
@@ -1592,6 +1623,8 @@ export const updateLead = async (req, res, next) => {
                 center_code,
                 remark,
                 is_converted,
+                is_connected,
+                english_proficiency_level,
                 full_name
             FROM Leads
             WHERE lead_id = @lead_id
@@ -2170,6 +2203,87 @@ export const updateLeadStatus = async (req, res, next) => {
         next(error);
     }
 };
+
+
+export const updateLeadIsConnected = async (req, res, next) => {
+    const pool = await poolPromise;
+    const transaction = new sql.Transaction(pool);
+
+    try {
+        const leadId = parseInt(req.params.id, 10);
+        const isConnected = req.body.is_connected;
+
+        
+
+        if (!Number.isInteger(leadId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid lead ID'
+            });
+        }
+
+        if (typeof isConnected !== 'boolean') {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid is_connected boolean value is required'
+            });
+        }
+
+        const updateRequest = new sql.Request(transaction);
+
+        updateRequest.input(
+            'lead_id',
+            sql.Int,
+            leadId
+        );
+        updateRequest.input(
+            'is_connected',
+            sql.Bit,
+            isConnected
+        );
+
+        await transaction.begin();
+
+        const updateResult = await updateRequest.query(`    
+        UPDATE Leads
+        SET
+            is_connected = @is_connected,
+            updated_at = GETDATE()
+        WHERE lead_id = @lead_id
+        `);
+
+
+        if (updateResult.rowsAffected[0] === 0) {
+            await transaction.rollback();
+
+            return res.status(404).json({
+                success: false,
+                message: 'Lead not found'
+            });
+        }
+
+        await transaction.commit();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Lead is_connected status updated successfully',
+            data: {
+                lead_id: leadId,
+                is_connected: isConnected
+            }
+        });
+
+    } catch (error) {
+        try {
+            await transaction.rollback();
+        } catch (rollbackError) {
+            console.error('Rollback failed:', rollbackError);
+        }
+
+        next(error);
+    }
+};
+
 
 
 
@@ -4458,6 +4572,8 @@ export const getAgentLeads = async (req, res, next) => {
                 L.assigned_to,
                 L.is_converted,
                 L.remark,
+                L.english_proficiency_level,
+                L.is_connected,
                 L.created_at,
                 L.updated_at
             FROM Leads L
@@ -4557,7 +4673,9 @@ export const searchAgentLeads = async (req, res, next) => {
                 L.is_converted,
                 L.remark,
                 L.created_at,
-                L.updated_at
+                L.updated_at,
+                L.english_proficiency_level,
+                L.is_connected
             FROM Leads L
             LEFT JOIN LeadStatuses LS
                 ON L.lead_status = LS.id
@@ -4695,6 +4813,8 @@ export const filterAgentLeads = async (req, res, next) => {
                 L.assigned_to,
                 L.is_converted,
                 L.remark,
+                L.english_proficiency_level,
+                L.is_connected,
                 L.created_at,
                 L.updated_at
             FROM Leads AS L

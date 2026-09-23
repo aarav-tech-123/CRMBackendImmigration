@@ -22,6 +22,7 @@ import leadCanadianRelationRoutes from "./routes/leadCanadianRelation.routes.js"
 import leadEducationRoutes from "./routes/leadEducation.routes.js"
 import leadPersonalInformationRoutes from "./routes/leadPersonalInformation.routes.js"
 import leadWorkExperienceRoutes from "./routes/leadWorkExperience.routes.js"
+import leadImportRoutes from "./routes/utils/leadImport.routes.js"
 import immigrationProgram from "./routes/utils/immigrationProgram.routes.js"
 import paymentTypes from "./routes/utils/paymentType.routes.js"
 import immigrationCaseRoutes from "./routes/immigrationCase.routes.js"
@@ -79,6 +80,7 @@ app.use(`${api}/lead-canadian-relation`, leadCanadianRelationRoutes)
 app.use(`${api}/lead-education`, leadEducationRoutes)
 app.use(`${api}/lead-personal-information`, leadPersonalInformationRoutes)
 app.use(`${api}/lead-work-experience`, leadWorkExperienceRoutes)
+app.use(`${api}/leads/import`, leadImportRoutes)
 app.use(`${api}/immigration/pipeline`, immigrationPipelineRoutes)
 app.use(`${api}/immigration/dashboard`, immigrationStatsRoutes)
 

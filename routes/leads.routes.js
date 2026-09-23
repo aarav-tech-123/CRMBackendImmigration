@@ -1,5 +1,5 @@
 import express from "express";
-import { createLead, getAllLeads, getLeadById, updateLead, deleteLead, getAgentLeads, searchAgentLeads, filterAgentLeads, filterSuperAdminLeads, searchSuperAdminLeads, updateLeadStatus, convertLeadIntoCase, convertLeadtoCase } from "../controllers/leads.controller.js";
+import { createLead, getAllLeads, getLeadById, updateLead, deleteLead, getAgentLeads, searchAgentLeads, filterAgentLeads, filterSuperAdminLeads, searchSuperAdminLeads, updateLeadStatus, convertLeadIntoCase, convertLeadtoCase, updateLeadIsConnected } from "../controllers/leads.controller.js";
 import { verifyToken, authorize } from "../middleware/auth.middleware.js";
 import { assignLead } from "../controllers/assignments.controller.js";
 // import { checkModuleRead, checkModuleWrite, checkModuleUpdate, checkModuleDelete } from "../middleware/modulePermission.middleware.js";
@@ -19,6 +19,7 @@ router.get("/SuperAdmin/search", verifyToken, authorize(["Manager", "SuperAdmin"
 router.get("/:id", verifyToken, authorize(["Agent", "SuperAdmin"]), getLeadById);
 router.patch("/:id", verifyToken, authorize(["SuperAdmin", "Agent"]), updateLead);
 router.put("/status/update/:id", verifyToken, authorize(["SuperAdmin", "Agent"]), updateLeadStatus)
+router.put("/isConnected/:id", verifyToken, authorize(["SuperAdmin", "Agent"]), updateLeadIsConnected)
 
 router.post("/convert/:leadId", verifyToken, authorize(["Manager", "SuperAdmin", "Agent"]), convertLeadtoCase)
 
