@@ -96,7 +96,7 @@ export const login = async (req, res) => {
     const token = jwt.sign(
       { id: user.id, role: user.role, center_code: user.center_code },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "1h" }
     );
 
     const userData = {
@@ -115,7 +115,7 @@ export const login = async (req, res) => {
 };
 
 
-const otpExpiryMinutes = 5 // OTP valid for 10 minutes
+const otpExpiryMinutes = 5 // OTP valid for 5 minutes
 
 
 
