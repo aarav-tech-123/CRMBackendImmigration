@@ -51,8 +51,7 @@ const HEADER_SYNONYMS = {
     email: "email",
     email_address: "email",
 
-    lead_status: "lead_status",
-    status: "lead_status",
+    disposition: "lead_status",
 
     assigned_to: "assigned_to",
     assigned_agent: "assigned_to",
@@ -161,10 +160,15 @@ const generateLeadNumber = (leadId) => {
  * ignored. Each row is imported in its own transaction so a bad row
  * doesn't block the rest of the file.
  *
+ * A row is skipped as a duplicate only when full_name, email_address
+ * AND mobile_number ALL match an existing lead - matching on just one
+ * or two of those fields does not count as a duplicate.
+ *
  * Populates:
  *  - Leads (first_name, last_name, phone_number -> mobile_number,
  *    email -> email_address, english_proficiency_level, lead_status,
- *    assigned_to, remark, created_at)
+ *    assigned_to, remark, income_band_(per_month) -> income_band_per_month,
+ *    created_at)
  *  - LeadEducation (education -> highest_level)
  *  - LeadWorkExperience (total_work_experience -> years_of_experience,
  *    job_title -> industry_area)
@@ -241,6 +245,18 @@ export const importLeadsFromExcel = async (req, res, next) => {
             ])
         );
 
+        /*
+         * Leads.lead_status is NOT NULL, so unmatched/missing status
+         * text can't just be left as NULL - fall back to whichever
+         * status has the lowest sort_order (e.g. "New").
+         */
+        const defaultStatus = statusResult.recordset.reduce(
+            (min, s) =>
+                !min || s.sort_order < min.sort_order ? s : min,
+            null
+        );
+        const defaultStatusId = defaultStatus?.id ?? null;
+
         const usersResult = await pool
             .request()
             .query(`SELECT id, name, email FROM Users`);
@@ -289,16 +305,66 @@ export const importLeadsFromExcel = async (req, res, next) => {
                 .filter(Boolean)
                 .join(" ");
 
-            const phoneNumber = toTrimmedStringOrNull(fields.phone_number);
+            const rawPhoneNumber = toTrimmedStringOrNull(fields.phone_number);
+            // Leads.mobile_number is NOT NULL - default to '' when missing.
+            const phoneNumber = rawPhoneNumber ?? "";
             const email = toTrimmedStringOrNull(fields.email);
             const englishProficiency = toTrimmedStringOrNull(
                 fields.english_proficiency_level
             );
 
-            const leadStatusText = toTrimmedStringOrNull(fields.lead_status);
-            const leadStatusId = leadStatusText
-                ? statusByName.get(normalizeHeader(leadStatusText)) || null
+            /*
+             * Duplicate check: a row is only a duplicate when name, email
+             * AND phone ALL match an existing lead. Matching on just one
+             * or two of those is NOT a duplicate. Skipped when the row
+             * itself is missing email or phone, since a partial match
+             * can't be verified as a true 3-way duplicate.
+             */
+            // if (rawPhoneNumber && email) {
+            //     const dupResult = await pool
+            //         .request()
+            //         .input("full_name", sql.NVarChar(250), fullName)
+            //         .input("email_address", sql.NVarChar(150), email)
+            //         .input("mobile_number", sql.NVarChar(30), rawPhoneNumber)
+            //         .query(`
+            //             SELECT TOP 1 lead_id
+            //             FROM Leads
+            //             WHERE LOWER(LTRIM(RTRIM(full_name))) = LOWER(LTRIM(RTRIM(@full_name)))
+            //               AND LOWER(LTRIM(RTRIM(email_address))) = LOWER(LTRIM(RTRIM(@email_address)))
+            //               AND LTRIM(RTRIM(mobile_number)) = LTRIM(RTRIM(@mobile_number))
+            //         `);
+
+            //     if (dupResult.recordset.length > 0) {
+            //         skipped.push({
+            //             row: rowNumber,
+            //             reason: `Duplicate lead - matches existing lead_id ${dupResult.recordset[0].lead_id} (same name, email, and phone)`
+            //         });
+            //         continue;
+            //     }
+            // }
+
+            const rowWarnings = [];
+
+            // "Disposition" column holds the status_name text - resolved
+            // against LeadStatuses and only the matching id goes into
+            // Leads.lead_status.
+            const dispositionText = toTrimmedStringOrNull(fields.lead_status);
+            const matchedStatusId = dispositionText
+                ? statusByName.get(normalizeHeader(dispositionText)) || null
                 : null;
+
+            // Leads.lead_status is NOT NULL - fall back to the default status.
+            const leadStatusId = matchedStatusId ?? defaultStatusId;
+
+            if (dispositionText && !matchedStatusId) {
+                rowWarnings.push(
+                    `Disposition "${dispositionText}" did not match any LeadStatuses.status_name — defaulted to "${defaultStatus?.status_name}"`
+                );
+            } else if (!dispositionText) {
+                rowWarnings.push(
+                    `Disposition missing — defaulted to "${defaultStatus?.status_name}"`
+                );
+            }
 
             const assignedToText = toTrimmedStringOrNull(fields.assigned_to);
             const assignedToId = assignedToText
@@ -307,13 +373,14 @@ export const importLeadsFromExcel = async (req, res, next) => {
                   null
                 : null;
 
-            const incomeBand = toTrimmedStringOrNull(fields.income_band);
-            const remarksText = toTrimmedStringOrNull(fields.remarks);
+            if (assignedToText && !assignedToId) {
+                rowWarnings.push(
+                    `assigned_to "${assignedToText}" did not match any Users.name/email — left unassigned`
+                );
+            }
 
-            const remarkParts = [];
-            if (incomeBand) remarkParts.push(`Income Band (per month): ${incomeBand}`);
-            if (remarksText) remarkParts.push(remarksText);
-            const remark = remarkParts.length ? remarkParts.join(" | ") : null;
+            const incomeBand = toTrimmedStringOrNull(fields.income_band);
+            const remark = toTrimmedStringOrNull(fields.remarks);
 
             const createdAt =
                 toDateOrNull(fields.created_time) ||
@@ -328,6 +395,14 @@ export const importLeadsFromExcel = async (req, res, next) => {
             const countryOfResidence = toTrimmedStringOrNull(
                 fields.country_of_residence
             );
+
+            if (leadStatusId === null) {
+                errors.push({
+                    row: rowNumber,
+                    reason: "No LeadStatuses configured to default to - add at least one row to LeadStatuses"
+                });
+                continue;
+            }
 
             const transaction = new sql.Transaction(pool);
 
@@ -351,6 +426,11 @@ export const importLeadsFromExcel = async (req, res, next) => {
                         englishProficiency
                     )
                     .input("remark", sql.NVarChar(sql.MAX), remark)
+                    .input(
+                        "income_band_per_month",
+                        sql.VarChar(100),
+                        incomeBand
+                    )
                     .input("created_at", sql.DateTime, createdAt)
                     .query(`
                         INSERT INTO dbo.Leads (
@@ -366,6 +446,7 @@ export const importLeadsFromExcel = async (req, res, next) => {
                             is_connected,
                             english_proficiency_level,
                             remark,
+                            income_band_per_month,
                             created_at,
                             updated_at
                         )
@@ -383,6 +464,7 @@ export const importLeadsFromExcel = async (req, res, next) => {
                             @is_connected,
                             @english_proficiency_level,
                             @remark,
+                            @income_band_per_month,
                             @created_at,
                             GETDATE()
                         )
@@ -431,11 +513,17 @@ export const importLeadsFromExcel = async (req, res, next) => {
                             sql.Decimal(10, 2),
                             totalWorkExperience
                         )
+                        // noc_code / noc_title are NOT NULL with no default
+                        // and the sheet has no NOC data - use a placeholder.
+                        .input("noc_code", sql.NVarChar(50), "")
+                        .input("noc_title", sql.NVarChar(255), "")
                         .query(`
                             INSERT INTO LeadWorkExperience (
                                 lead_id,
                                 industry_area,
                                 years_of_experience,
+                                noc_code,
+                                noc_title,
                                 created_at,
                                 updated_at
                             )
@@ -443,6 +531,8 @@ export const importLeadsFromExcel = async (req, res, next) => {
                                 @lead_id,
                                 @industry_area,
                                 @years_of_experience,
+                                @noc_code,
+                                @noc_title,
                                 GETDATE(),
                                 GETDATE()
                             )
@@ -499,7 +589,10 @@ export const importLeadsFromExcel = async (req, res, next) => {
                 imported.push({
                     row: rowNumber,
                     lead_id: leadId,
-                    lead_number: leadNumber
+                    lead_number: leadNumber,
+                    assigned_to: assignedToId,
+                    lead_status: leadStatusId,
+                    warnings: rowWarnings.length ? rowWarnings : undefined
                 });
 
             } catch (rowError) {
