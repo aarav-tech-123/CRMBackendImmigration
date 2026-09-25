@@ -288,6 +288,7 @@ export const getLeadAddressesByLeadId = async (req, res, next) => {
     try {
         const { lead_id } = req.params;
 
+        
         if (!lead_id || isNaN(lead_id)) {
             return res.status(400).json({
                 success: false,
@@ -317,7 +318,7 @@ export const getLeadAddressesByLeadId = async (req, res, next) => {
                     LA.updated_at
                 FROM LeadAddresses LA
                 JOIN Leads L ON LA.lead_id = L.lead_id
-                WHERE lead_id = @lead_id
+                WHERE LA.lead_id = @lead_id
                 ORDER BY
                     is_primary DESC,
                     address_id DESC
