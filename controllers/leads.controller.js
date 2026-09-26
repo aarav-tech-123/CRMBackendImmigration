@@ -603,6 +603,7 @@ export const getAllLeads = async (req, res, next) => {
                 L.remark,
                 L.created_at,
                 L.english_proficiency_level,
+                L.income_band_per_month,
                 L.is_connected,
                 L.updated_at
 
@@ -1249,6 +1250,7 @@ export const searchSuperAdminLeads = async (req, res, next) => {
                 L.is_converted,
                 L.remark,
                 L.english_proficiency_level,
+                L.income_band_per_month,
                 L.is_connected,
                 L.created_at,
                 L.updated_at
@@ -1381,6 +1383,7 @@ export const filterSuperAdminLeads = async (req, res, next) => {
                 L.is_converted,
                 L.remark,
                 L.english_proficiency_level,
+                L.income_band_per_month,
                 L.is_connected,
                 L.created_at,
                 L.updated_at
@@ -1495,6 +1498,7 @@ export const getLeadById = async (req, res, next) => {
                     L.remark,
 
                     L.english_proficiency_level,
+                    L.income_band_per_month,
                     L.is_connected,
 
                     L.created_at,
@@ -1575,7 +1579,8 @@ export const updateLead = async (req, res, next) => {
             remark: sql.NVarChar(sql.MAX),
             is_converted: sql.Bit,
             is_connected: sql.Bit,
-            english_proficiency_level: sql.NVarChar(50)
+            english_proficiency_level: sql.NVarChar(50),
+            income_band_per_month: sql.NVarChar(50)
         };
 
         // Readable field names for ActivityLogs
@@ -1593,6 +1598,7 @@ export const updateLead = async (req, res, next) => {
             is_converted: 'Converted',
             is_connected: 'Connected',
             english_proficiency_level: 'English Proficiency Level',
+            income_band_per_month: 'Income Band Per Month',
             full_name: 'Full Name'
         };
 
@@ -1625,6 +1631,7 @@ export const updateLead = async (req, res, next) => {
                 is_converted,
                 is_connected,
                 english_proficiency_level,
+                income_band_per_month,
                 full_name
             FROM Leads
             WHERE lead_id = @lead_id
@@ -4573,6 +4580,7 @@ export const getAgentLeads = async (req, res, next) => {
                 L.is_converted,
                 L.remark,
                 L.english_proficiency_level,
+                L.income_band_per_month,
                 L.is_connected,
                 L.created_at,
                 L.updated_at
@@ -4675,6 +4683,7 @@ export const searchAgentLeads = async (req, res, next) => {
                 L.created_at,
                 L.updated_at,
                 L.english_proficiency_level,
+                L.income_band_per_month,
                 L.is_connected
             FROM Leads L
             LEFT JOIN LeadStatuses LS
@@ -4814,6 +4823,7 @@ export const filterAgentLeads = async (req, res, next) => {
                 L.is_converted,
                 L.remark,
                 L.english_proficiency_level,
+                L.income_band_per_month
                 L.is_connected,
                 L.created_at,
                 L.updated_at
@@ -4868,10 +4878,6 @@ export const filterAgentLeads = async (req, res, next) => {
 
 
 
-// Lead status count
-
-
-// -------------------------------------- AGENT SPECIFIC CONTROLLERS ----------------END-------------------------------- //
 
 
 
