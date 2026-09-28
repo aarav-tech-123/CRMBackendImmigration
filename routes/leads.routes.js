@@ -1,5 +1,5 @@
 import express from "express";
-import { createLead, getAllLeads, getLeadById, updateLead, deleteLead, getAgentLeads, searchAgentLeads, filterAgentLeads, filterSuperAdminLeads, searchSuperAdminLeads, updateLeadStatus, convertLeadIntoCase, convertLeadtoCase, updateLeadIsConnected, getLeadsForCapiExport } from "../controllers/leads.controller.js";
+import { createLead, getAllLeads, getLeadById, updateLead, deleteLead, getAgentLeads, searchAgentLeads, filterAgentLeads, filterSuperAdminLeads, searchSuperAdminLeads, updateLeadStatus, convertLeadIntoCase, convertLeadtoCase, updateLeadIsConnected } from "../controllers/leads.controller.js";
 import { verifyToken, authorize } from "../middleware/auth.middleware.js";
 import { assignLead } from "../controllers/assignments.controller.js";
 // import { checkModuleRead, checkModuleWrite, checkModuleUpdate, checkModuleDelete } from "../middleware/modulePermission.middleware.js";
@@ -15,8 +15,6 @@ router.delete("/:id", verifyToken, authorize(["SuperAdmin"]), deleteLead);
 router.get("/SuperAdmin/filter", verifyToken, authorize(["Manager", "SuperAdmin", "Agent"]), filterSuperAdminLeads);
 router.get("/SuperAdmin/search", verifyToken, authorize(["Manager", "SuperAdmin", "Agent"]), searchSuperAdminLeads);
 
-// READ-ONLY: external integration export (e.g. Meta CAPI qualification sync)
-router.get("/export/capi", verifyToken, authorize(["SuperAdmin"]), getLeadsForCapiExport);
 
 // Common routes for both agent and super admin
 router.get("/:id", verifyToken, authorize(["Agent", "SuperAdmin"]), getLeadById);
