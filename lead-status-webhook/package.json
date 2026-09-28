@@ -1,0 +1,20 @@
+{
+  "name": "lead-status-webhook",
+  "version": "1.0.0",
+  "description": "Forwards Meta lead qualification status (qualified / not qualified) to Meta Conversions API via Stape",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "sync": "node sync.js",
+    "watch": "node watch.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
