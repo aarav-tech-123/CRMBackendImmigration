@@ -39,6 +39,7 @@ import caseDocumentRequirementRoutes from "./routes/caseDocumentRequirement.rout
 import caseDocumentRoutes from "./routes/caseDocument.routes.js"
 import immigrationPipelineRoutes from "./routes/immigrationPipeline.routes.js"
 import immigrationStatsRoutes from "./routes/dashboardStats.routes.js"
+import paymentsRoutes from "./routes/payments.routes.js"
 
 import path from "path";
 
@@ -102,6 +103,7 @@ app.use(`${api}/notes`, notesRoutes)
 app.use(`${api}/followups`, followUpRoutes)
 app.use(`${api}/notifications`, notificationRoutes)
 app.use(`${api}/reminders`, reminderRoutes)
+app.use(`${api}/payments`, paymentsRoutes)
 
 
 
