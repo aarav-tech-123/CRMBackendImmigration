@@ -116,6 +116,8 @@ const readAccountBody = (body) => ({
 
 export const createAccount = async (req, res) => {
   const body = req.body || {};
+
+  console.log("Received request to create account with body:", body);
   const data = readAccountBody(body);
 
   console.log("Creating account with data:", data);

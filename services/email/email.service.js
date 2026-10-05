@@ -77,7 +77,14 @@ const buildTransport = (account) =>
     socketTimeout: 30000,
   });
 
-export const verifySmtp = (account) => buildTransport(account).verify();
+export const verifySmtp = async (account) => {
+  try {
+    await buildTransport(account).verify();
+  } catch (err) {
+    const detail = err.response || err.code || "";
+    throw new Error(`SMTP (${account.smtp_host}:${account.smtp_port}): ${err.message}${detail ? ` - ${detail}` : ""}`);
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Lead / case matching

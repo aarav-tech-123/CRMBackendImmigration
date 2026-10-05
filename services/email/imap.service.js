@@ -30,8 +30,13 @@ const connect = async (account) => {
 };
 
 export const verifyImap = async (account) => {
-  const client = await connect(account);
-  await client.logout();
+  try {
+    const client = await connect(account);
+    await client.logout();
+  } catch (err) {
+    const detail = err.responseText || err.response || err.code || "";
+    throw new Error(`IMAP (${account.imap_host}:${account.imap_port}): ${err.message}${detail ? ` - ${detail}` : ""}`);
+  }
 };
 
 // INBOX plus whichever Sent / Junk / Trash mailboxes the server advertises.
