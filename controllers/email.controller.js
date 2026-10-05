@@ -118,6 +118,8 @@ export const createAccount = async (req, res) => {
   const body = req.body || {};
   const data = readAccountBody(body);
 
+  console.log("Creating account with data:", data);
+
   if (!data.email_address || invalidAddresses([data.email_address]).length || !body.password || !data.smtp_host || !data.imap_host) {
     return res.status(400).json({
       success: false,
