@@ -15,7 +15,8 @@ router.delete("/:id", verifyToken, authorize(["SuperAdmin"]), deleteLead);
 router.get("/SuperAdmin/filter", verifyToken, authorize(["Manager", "SuperAdmin", "Agent"]), filterSuperAdminLeads);
 router.get("/SuperAdmin/search", verifyToken, authorize(["Manager", "SuperAdmin", "Agent"]), searchSuperAdminLeads);
 
-// Common routes for both agent and super admin 
+
+// Common routes for both agent and super admin
 router.get("/:id", verifyToken, authorize(["Agent", "SuperAdmin"]), getLeadById);
 router.patch("/:id", verifyToken, authorize(["SuperAdmin", "Agent"]), updateLead);
 router.put("/status/update/:id", verifyToken, authorize(["SuperAdmin", "Agent"]), updateLeadStatus)

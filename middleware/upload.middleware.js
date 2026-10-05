@@ -54,3 +54,27 @@ export const uploadLeadImportFile = multer({
   },
   limits: { fileSize: MAX_LEAD_IMPORT_SIZE_BYTES },
 });
+
+// Outgoing email attachments: held in memory, handed to SMTP, then stored privately by the email service.
+const BLOCKED_EMAIL_EXTENSIONS = new Set([".exe", ".bat", ".cmd", ".com", ".scr", ".msi", ".vbs", ".js", ".jar", ".ps1", ".sh"]);
+const MAX_EMAIL_ATTACHMENT_BYTES = 15 * 1024 * 1024; // 15MB each
+const MAX_EMAIL_ATTACHMENTS = 10;
+
+const emailAttachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (BLOCKED_EMAIL_EXTENSIONS.has(ext)) {
+      return cb(new Error(`Attachments of type "${ext}" are not allowed.`));
+    }
+    cb(null, true);
+  },
+  limits: { fileSize: MAX_EMAIL_ATTACHMENT_BYTES, files: MAX_EMAIL_ATTACHMENTS },
+}).array("attachments", MAX_EMAIL_ATTACHMENTS);
+
+// Turns multer failures into a 400 JSON response instead of Express's default 500 page.
+export const uploadEmailAttachments = (req, res, next) =>
+  emailAttachmentUpload(req, res, (err) => {
+    if (err) return res.status(400).json({ success: false, message: err.message });
+    next();
+  });
