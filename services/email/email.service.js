@@ -68,7 +68,9 @@ const buildTransport = (account) =>
   nodemailer.createTransport({
     host: account.smtp_host,
     port: account.smtp_port,
-    secure: !!account.smtp_secure,
+    // Implicit TLS only works on 465; 587 must start plain and upgrade via STARTTLS.
+    secure: Number(account.smtp_port) === 465 ? true : Number(account.smtp_port) === 587 ? false : !!account.smtp_secure,
+    requireTLS: Number(account.smtp_port) === 587,
     auth: { user: account.username, pass: decryptSecret(account.password_enc) },
     connectionTimeout: 15000,
     greetingTimeout: 15000,
