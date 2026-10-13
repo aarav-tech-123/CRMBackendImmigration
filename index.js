@@ -25,6 +25,8 @@ import leadWorkExperienceRoutes from "./routes/leadWorkExperience.routes.js"
 import leadImportRoutes from "./routes/utils/leadImport.routes.js"
 import immigrationProgram from "./routes/utils/immigrationProgram.routes.js"
 import paymentTypes from "./routes/utils/paymentType.routes.js"
+import pnpProgramRoutes from "./routes/utils/pnpProgram.routes.js"
+import casePnpRoutes from "./routes/casePnp.routes.js"
 import immigrationCaseRoutes from "./routes/immigrationCase.routes.js"
 import caseWorkflowRoutes from "./routes/caseWorkflow.routes.js"
 import caseTaskRoutes from "./routes/caseTask.routes.js"
@@ -90,12 +92,14 @@ app.use(`${api}/immigration/dashboard`, immigrationStatsRoutes)
 // Utils Endpoints
 app.use(`${api}/immigration-program`, immigrationProgram)
 app.use(`${api}/payment-types`, paymentTypes)
+app.use(`${api}/pnp-programs`, pnpProgramRoutes)
 app.use(`${api}/lead-status`, leadStatusMaster)
 app.use(`${api}/task-status`, taskStatusRoutes)
 app.use(`${api}/document-types`, documentTypeRoutes)
 app.use(`${api}/document-status`, documentStatusRoutes)
 
 
+app.use(`${api}/immigration-cases/pnp-programs`, casePnpRoutes)
 app.use(`${api}/immigration-cases`, immigrationCaseRoutes)
 app.use(`${api}/immigration/workflow`, caseWorkflowRoutes)
 app.use(`${api}/immigration-cases/task`, caseTaskRoutes)
