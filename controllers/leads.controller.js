@@ -4823,7 +4823,7 @@ export const filterAgentLeads = async (req, res, next) => {
                 L.is_converted,
                 L.remark,
                 L.english_proficiency_level,
-                L.income_band_per_month
+                L.income_band_per_month,
                 L.is_connected,
                 L.created_at,
                 L.updated_at
