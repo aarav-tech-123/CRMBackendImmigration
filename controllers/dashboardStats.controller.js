@@ -123,7 +123,6 @@ export const getDashboardSummary = async (req, res) => {
 export const getLeadStatusCountsByUser = async (req, res) => {
   
   const user_id = req.user.id;
-  const center_code = req.user.center_code;
 
   if (
     user_id &&
@@ -145,11 +144,6 @@ export const getLeadStatusCountsByUser = async (req, res) => {
         sql.Int,
         user_id ? Number(user_id) : null
       )
-      .input(
-        'centerCode',
-        sql.VarChar(50),
-        center_code || null
-      )
       .query(`
         SELECT
             ls.id AS status_id,
@@ -159,9 +153,8 @@ export const getLeadStatusCountsByUser = async (req, res) => {
 
         LEFT JOIN [dbo].[Leads] l
             ON l.lead_status = ls.id
-            AND l.assigned_to IS NOT NULL
+            OR l.assigned_to IS NOT NULL
             AND (@userId IS NULL OR l.assigned_to = @userId)
-            AND (@centerCode IS NULL OR l.center_code = @centerCode)
 
         GROUP BY
             ls.id,
