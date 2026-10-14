@@ -122,7 +122,7 @@ export const getDashboardSummary = async (req, res) => {
 // row in Users. Optional ?user_id= / ?center_code= narrow it further.
 export const getLeadStatusCountsByUser = async (req, res) => {
   
-  const user_id = req.user.id;
+  const user_id = req.query.userId;
 
   if (
     user_id &&
@@ -130,7 +130,7 @@ export const getLeadStatusCountsByUser = async (req, res) => {
   ) {
     return res.status(400).json({
       success: false,
-      message: 'user_id must be a valid positive integer.',
+      message: 'userId must be a valid positive integer.',
     });
   }
 
@@ -153,7 +153,6 @@ export const getLeadStatusCountsByUser = async (req, res) => {
 
         LEFT JOIN [dbo].[Leads] l
             ON l.lead_status = ls.id
-            OR l.assigned_to IS NOT NULL
             AND (@userId IS NULL OR l.assigned_to = @userId)
 
         GROUP BY
