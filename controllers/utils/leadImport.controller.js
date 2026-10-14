@@ -487,7 +487,7 @@ export const importLeadsFromExcel = async (req, res, next) => {
                 if (education) {
                     await new sql.Request(transaction)
                         .input("lead_id", sql.Int, leadId)
-                        .input("highest_level", sql.NVarChar(100), education)
+                        .input("highest_level", sql.NVarChar(sql.MAX), education || null)
                         .query(`
                             INSERT INTO LeadEducation (
                                 lead_id,
