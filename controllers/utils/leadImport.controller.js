@@ -2,6 +2,13 @@ import XLSX from "xlsx";
 import { sql, poolPromise } from "../../config/db.js";
 import { createActivityLog } from "../../helpers/activityLogs.js";
 import { getRequestInfo } from "../../helpers/requestInfo.js";
+import {
+    LEAD_CAMPAIGN_TEXT_FIELDS,
+    DEFAULT_CAMPAIGN_COUNTRY,
+    detectCampaignType,
+    normalizeCampaignType,
+    normalizePhone
+} from "../../helpers/leadCampaigns.js";
 
 /**
  * Maps every recognised spreadsheet header (after normalization) to a
@@ -51,7 +58,28 @@ const HEADER_SYNONYMS = {
     email: "email",
     email_address: "email",
 
-    disposition: "lead_status",
+    disposition: "disposition",
+
+    id: "meta_lead_id",
+    form_id: "meta_form_id",
+    form_name: "meta_form_name",
+    is_organic: "meta_is_organic",
+    platform: "meta_platform",
+    campaign_name: "meta_campaign_name",
+
+    nationality: "nationality",
+    tagging: "tagging",
+    conditional_question_1: "conditional_question_1",
+
+    // Special Healthcare form questions
+    what_is_your_current_healthcare_profession: "healthcare_profession",
+    how_many_years_of_relevant_work_experience_do_you_have: "total_work_experience",
+    what_is_your_highest_completed_qualification: "education",
+    have_you_taken_an_approved_english_or_french_language_test: "language_test_taken",
+    when_are_you_planning_to_explore_moving_to_canada: "planned_move_timeline",
+
+    work_phone_number: "work_phone_number",
+
 
     assigned_to: "assigned_to",
     assigned_agent: "assigned_to",
@@ -83,10 +111,19 @@ const normalizeHeader = (header) => {
  */
 const buildColumnMap = (headerRow) => {
     const columnMap = {};
+    const normalizedHeaders = headerRow.map(normalizeHeader);
 
-    headerRow.forEach((rawHeader, index) => {
-        const normalized = normalizeHeader(rawHeader);
-        const field = HEADER_SYNONYMS[normalized];
+    // "Lead Date" present => any bare "Date"/"Time" columns are call-tracking
+    // columns we do not import. No "Lead Date" (Special Healthcare sheet) => the
+    // bare "Date" IS the lead date.
+    const hasLeadDate = normalizedHeaders.includes("lead_date");
+
+    normalizedHeaders.forEach((normalized, index) => {
+        let field = HEADER_SYNONYMS[normalized];
+
+        if (normalized === "date") {
+            field = hasLeadDate ? undefined : "lead_date";
+        }
 
         if (field) {
             columnMap[index] = field;
@@ -115,6 +152,12 @@ const extractNumber = (value) => {
 
     const num = parseFloat(match[0]);
     return Number.isFinite(num) ? num : null;
+};
+
+const toBitOrNull = (value) => {
+    const str = toTrimmedStringOrNull(value);
+    if (str === null) return null;
+    return ["true", "1", "yes"].includes(str.toLowerCase()) ? 1 : 0;
 };
 
 const toDateOrNull = (value) => {
@@ -163,6 +206,11 @@ const generateLeadNumber = (leadId) => {
  * A row is skipped as a duplicate only when full_name, email_address
  * AND mobile_number ALL match an existing lead - matching on just one
  * or two of those fields does not count as a duplicate.
+ *
+ * Also stores the campaign fields (see database/lead_campaigns_schema.sql)
+ * and handles the three Meta sheet layouts (Basic / Special Healthcare / UK).
+ *
+ * Query params: campaign_type, campaign_country, campaign_name, update_existing=true
  *
  * Populates:
  *  - Leads (first_name, last_name, phone_number -> mobile_number,
@@ -236,7 +284,7 @@ export const importLeadsFromExcel = async (req, res, next) => {
          */
         const statusResult = await pool
             .request()
-            .query(`SELECT id, status_name FROM LeadStatuses`);
+            .query(`SELECT id, status_name, sort_order FROM LeadStatuses`);
 
         const statusByName = new Map(
             statusResult.recordset.map((s) => [
@@ -275,7 +323,29 @@ export const importLeadsFromExcel = async (req, res, next) => {
             }
         });
 
+        /*
+         * Which of the three sheet layouts is this? Detected from the headers,
+         * overridable with ?campaign_type=  &campaign_country=  &campaign_name=
+         * (query string or form field). Needed because the "Basic" sheet mixes
+         * Middle East and Healthcare leads and carries no campaign column.
+         */
+        const opt = (k) => toTrimmedStringOrNull(req.query?.[k] ?? req.body?.[k]);
+        const sheetCampaignType =
+            normalizeCampaignType(opt("campaign_type")) ||
+            detectCampaignType(new Set(Object.values(columnMap)));
+        const sheetCampaignCountry =
+            opt("campaign_country") ??
+            DEFAULT_CAMPAIGN_COUNTRY[sheetCampaignType] ??
+            null;
+        const sheetCampaignName = opt("campaign_name");
+        // true => rows matching an existing lead fill that lead's EMPTY campaign
+        // columns instead of being skipped (used to tag the data already in prod).
+        const updateExisting = ["true", "1", "yes"].includes(
+            String(opt("update_existing") ?? "").toLowerCase()
+        );
+
         const imported = [];
+        const updated = [];
         const skipped = [];
         const errors = [];
 
@@ -313,42 +383,95 @@ export const importLeadsFromExcel = async (req, res, next) => {
                 fields.english_proficiency_level
             );
 
-            /*
-             * Duplicate check: a row is only a duplicate when name, email
-             * AND phone ALL match an existing lead. Matching on just one
-             * or two of those is NOT a duplicate. Skipped when the row
-             * itself is missing email or phone, since a partial match
-             * can't be verified as a true 3-way duplicate.
-             */
-            // if (rawPhoneNumber && email) {
-            //     const dupResult = await pool
-            //         .request()
-            //         .input("full_name", sql.NVarChar(250), fullName)
-            //         .input("email_address", sql.NVarChar(150), email)
-            //         .input("mobile_number", sql.NVarChar(30), rawPhoneNumber)
-            //         .query(`
-            //             SELECT TOP 1 lead_id
-            //             FROM Leads
-            //             WHERE LOWER(LTRIM(RTRIM(full_name))) = LOWER(LTRIM(RTRIM(@full_name)))
-            //               AND LOWER(LTRIM(RTRIM(email_address))) = LOWER(LTRIM(RTRIM(@email_address)))
-            //               AND LTRIM(RTRIM(mobile_number)) = LTRIM(RTRIM(@mobile_number))
-            //         `);
+            const metaLeadId =
+                toTrimmedStringOrNull(fields.meta_lead_id)?.replace(/^l:/i, "") ?? null;
+            const normPhone = normalizePhone(rawPhoneNumber);
+            const normEmail = email ? email.toLowerCase() : null;
 
-            //     if (dupResult.recordset.length > 0) {
-            //         skipped.push({
-            //             row: rowNumber,
-            //             reason: `Duplicate lead - matches existing lead_id ${dupResult.recordset[0].lead_id} (same name, email, and phone)`
-            //         });
-            //         continue;
-            //     }
-            // }
+            // Values for the campaign columns of this row.
+            const workExperienceText = toTrimmedStringOrNull(fields.total_work_experience);
+            const campaignValues = {};
+            Object.keys(LEAD_CAMPAIGN_TEXT_FIELDS).forEach((col) => {
+                campaignValues[col] = toTrimmedStringOrNull(fields[col]);
+            });
+            campaignValues.campaign_type = sheetCampaignType;
+            campaignValues.campaign_country = sheetCampaignCountry;
+            campaignValues.meta_campaign_name =
+                campaignValues.meta_campaign_name ?? sheetCampaignName;
+            campaignValues.total_work_experience_text = workExperienceText;
+
+            const leadDate = toDateOrNull(fields.lead_date) || toDateOrNull(fields.created_time);
+            const extraValues = {
+                lead_date: [sql.DateTime2, leadDate],
+                meta_lead_id: [sql.NVarChar(50), metaLeadId],
+                meta_form_id: [sql.NVarChar(50), toTrimmedStringOrNull(fields.meta_form_id)],
+                meta_is_organic: [sql.Bit, toBitOrNull(fields.meta_is_organic)],
+                meta_created_time: [sql.DateTime2, toDateOrNull(fields.created_time)]
+            };
+            const campaignColumns = [
+                ...Object.entries(LEAD_CAMPAIGN_TEXT_FIELDS).map(([col, type]) => [col, type, campaignValues[col]]),
+                ...Object.entries(extraValues).map(([col, [type, value]]) => [col, type, value])
+            ];
+
+            /*
+             * Duplicate check against leads already in the CRM (the ones imported
+             * before this change have no Meta id, so phone / email are matched too):
+             * Meta id, then last-10-digits of the phone, then email.
+             */
+            if (metaLeadId || normPhone || normEmail) {
+                const dupResult = await pool
+                    .request()
+                    .input("meta_lead_id", sql.NVarChar(50), metaLeadId)
+                    .input("phone", sql.VarChar(15), normPhone)
+                    .input("email", sql.NVarChar(150), normEmail)
+                    .query(`
+                        SELECT TOP 1 lead_id
+                        FROM dbo.Leads
+                        WHERE (@meta_lead_id IS NOT NULL AND meta_lead_id = @meta_lead_id)
+                           OR (@phone IS NOT NULL AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(
+                                  ISNULL(mobile_number, ''), '+', ''), ' ', ''), '-', ''), 'p:', ''), 10) = @phone)
+                           OR (@email IS NOT NULL AND LOWER(LTRIM(RTRIM(email_address))) = @email)
+                        ORDER BY lead_id
+                    `);
+
+                if (dupResult.recordset.length > 0) {
+                    const existingId = dupResult.recordset[0].lead_id;
+
+                    if (!updateExisting) {
+                        skipped.push({
+                            row: rowNumber,
+                            reason: `Duplicate - matches existing lead_id ${existingId} (Meta id / phone / email)`
+                        });
+                        continue;
+                    }
+
+                    // Fill ONLY empty campaign columns; never touch status, assignment, remarks, etc.
+                    try {
+                        const upd = pool.request().input("lead_id", sql.Int, existingId);
+                        const sets = campaignColumns.map(([col, type, value]) => {
+                            upd.input(col, type, value);
+                            return `${col} = ISNULL(${col}, @${col})`;
+                        });
+                        // another lead already owning this Meta id would violate the unique index
+                        await upd.query(`
+                            UPDATE dbo.Leads
+                            SET ${sets.join(", ")}, updated_at = GETDATE()
+                            WHERE lead_id = @lead_id
+                        `);
+                        updated.push({ row: rowNumber, lead_id: existingId });
+                    } catch (updError) {
+                        errors.push({ row: rowNumber, reason: updError.message || "Update failed" });
+                    }
+                    continue;
+                }
+            }
 
             const rowWarnings = [];
 
             // "Disposition" column holds the status_name text - resolved
             // against LeadStatuses and only the matching id goes into
             // Leads.lead_status.
-            const dispositionText = toTrimmedStringOrNull(fields.lead_status);
+            const dispositionText = toTrimmedStringOrNull(fields.disposition);
             const matchedStatusId = dispositionText
                 ? statusByName.get(normalizeHeader(dispositionText)) || null
                 : null;
@@ -388,7 +511,9 @@ export const importLeadsFromExcel = async (req, res, next) => {
                 new Date();
 
             const education = toTrimmedStringOrNull(fields.education);
-            const jobTitle = toTrimmedStringOrNull(fields.job_title);
+            const jobTitle =
+                toTrimmedStringOrNull(fields.job_title) ||
+                toTrimmedStringOrNull(fields.healthcare_profession);
             const totalWorkExperience = extractNumber(
                 fields.total_work_experience
             );
@@ -409,7 +534,11 @@ export const importLeadsFromExcel = async (req, res, next) => {
             try {
                 await transaction.begin();
 
-                const leadResult = await new sql.Request(transaction)
+                const leadRequest = new sql.Request(transaction);
+                campaignColumns.forEach(([col, type, value]) =>
+                    leadRequest.input(col, type, value)
+                );
+                const leadResult = await leadRequest
                     .input("first_name", sql.NVarChar(100), firstName)
                     .input("last_name", sql.NVarChar(100), lastName)
                     .input("full_name", sql.NVarChar(250), fullName)
@@ -432,12 +561,14 @@ export const importLeadsFromExcel = async (req, res, next) => {
                         incomeBand
                     )
                     .input("created_at", sql.DateTime, createdAt)
+                    .input("alt_phone_number", sql.NVarChar(30), toTrimmedStringOrNull(fields.work_phone_number))
                     .query(`
                         INSERT INTO dbo.Leads (
                             first_name,
                             last_name,
                             full_name,
                             mobile_number,
+                            alt_phone_number,
                             email_address,
                             source,
                             lead_status,
@@ -448,7 +579,8 @@ export const importLeadsFromExcel = async (req, res, next) => {
                             remark,
                             income_band_per_month,
                             created_at,
-                            updated_at
+                            updated_at,
+                            ${campaignColumns.map(([col]) => col).join(", ")}
                         )
                         OUTPUT inserted.lead_id
                         VALUES (
@@ -456,6 +588,7 @@ export const importLeadsFromExcel = async (req, res, next) => {
                             @last_name,
                             @full_name,
                             @mobile_number,
+                            @alt_phone_number,
                             @email_address,
                             @source,
                             @lead_status,
@@ -466,7 +599,8 @@ export const importLeadsFromExcel = async (req, res, next) => {
                             @remark,
                             @income_band_per_month,
                             @created_at,
-                            GETDATE()
+                            GETDATE(),
+                            ${campaignColumns.map(([col]) => `@${col}`).join(", ")}
                         )
                     `);
 
@@ -615,10 +749,17 @@ export const importLeadsFromExcel = async (req, res, next) => {
             summary: {
                 total_rows: dataRows.length,
                 imported: imported.length,
+                updated_existing: updated.length,
                 skipped: skipped.length,
                 failed: errors.length
             },
+            campaign: {
+                campaign_type: sheetCampaignType,
+                campaign_country: sheetCampaignCountry,
+                update_existing: updateExisting
+            },
             imported,
+            updated,
             skipped,
             errors
         });

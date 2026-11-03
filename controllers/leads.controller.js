@@ -2,6 +2,7 @@ import { sql, poolPromise } from "../config/db.js";
 import { createActivityLog } from '../helpers/activityLogs.js';
 import { getRequestInfo } from '../helpers/requestInfo.js';
 import { generateCaseNumber } from './utils/caseNumberGenerator.js'
+import { LEAD_CAMPAIGN_SELECT, LEAD_CAMPAIGN_TEXT_FIELDS, normalizeCampaignType } from '../helpers/leadCampaigns.js';
 
 
 // ----------------------------------- CONTROLLERS SPECIFIC TO THE SUPER ADMIN ---------START----------------------------------- //
@@ -282,6 +283,25 @@ export const createLead = async (req, res, next) => {
                 : null
         );
 
+        // Campaign fields (all optional)
+        const campaignCols = [];
+        for (const [col, type] of Object.entries(LEAD_CAMPAIGN_TEXT_FIELDS)) {
+            let value = data[col] !== undefined && data[col] !== null && String(data[col]).trim() !== ''
+                ? String(data[col]).trim()
+                : null;
+            if (col === 'campaign_type') value = normalizeCampaignType(value);
+            request.input(col, type, value);
+            campaignCols.push(col);
+        }
+        request.input(
+            'lead_date',
+            sql.DateTime2,
+            data.lead_date && !Number.isNaN(new Date(data.lead_date).getTime())
+                ? new Date(data.lead_date)
+                : null
+        );
+        campaignCols.push('lead_date');
+
         const insertQuery = `
             INSERT INTO dbo.Leads (
                 first_name,
@@ -301,7 +321,8 @@ export const createLead = async (req, res, next) => {
                 english_proficiency_level,
                 remark,
                 created_at,
-                updated_at
+                updated_at,
+                ${campaignCols.join(', ')}
             )
 
             OUTPUT
@@ -325,7 +346,8 @@ export const createLead = async (req, res, next) => {
                 @english_proficiency_level,
                 @remark,
                 GETDATE(),
-                GETDATE()
+                GETDATE(),
+                ${campaignCols.map(c => '@' + c).join(', ')}
             )
         `;
 
@@ -604,6 +626,7 @@ export const getAllLeads = async (req, res, next) => {
                 L.created_at,
                 L.english_proficiency_level,
                 L.income_band_per_month,
+                ${LEAD_CAMPAIGN_SELECT},
                 L.is_connected,
                 L.updated_at
 
@@ -1251,6 +1274,7 @@ export const searchSuperAdminLeads = async (req, res, next) => {
                 L.remark,
                 L.english_proficiency_level,
                 L.income_band_per_month,
+                ${LEAD_CAMPAIGN_SELECT},
                 L.is_connected,
                 L.created_at,
                 L.updated_at
@@ -1384,6 +1408,7 @@ export const filterSuperAdminLeads = async (req, res, next) => {
                 L.remark,
                 L.english_proficiency_level,
                 L.income_band_per_month,
+                ${LEAD_CAMPAIGN_SELECT},
                 L.is_connected,
                 L.created_at,
                 L.updated_at
@@ -1499,6 +1524,7 @@ export const getLeadById = async (req, res, next) => {
 
                     L.english_proficiency_level,
                     L.income_band_per_month,
+                ${LEAD_CAMPAIGN_SELECT},
                     L.is_connected,
 
                     L.created_at,
@@ -1580,7 +1606,8 @@ export const updateLead = async (req, res, next) => {
             is_converted: sql.Bit,
             is_connected: sql.Bit,
             english_proficiency_level: sql.NVarChar(50),
-            income_band_per_month: sql.NVarChar(50)
+            income_band_per_month: sql.NVarChar(50),
+            ...LEAD_CAMPAIGN_TEXT_FIELDS
         };
 
         // Readable field names for ActivityLogs
@@ -1599,7 +1626,11 @@ export const updateLead = async (req, res, next) => {
             is_connected: 'Connected',
             english_proficiency_level: 'English Proficiency Level',
             income_band_per_month: 'Income Band Per Month',
-            full_name: 'Full Name'
+            full_name: 'Full Name',
+            campaign_type: 'Campaign Type',
+            campaign_country: 'Campaign Country',
+            nationality: 'Nationality',
+            tagging: 'Tagging'
         };
 
         await transaction.begin();
@@ -1632,7 +1663,8 @@ export const updateLead = async (req, res, next) => {
                 is_connected,
                 english_proficiency_level,
                 income_band_per_month,
-                full_name
+                full_name,
+                ${Object.keys(LEAD_CAMPAIGN_TEXT_FIELDS).join(', ')}
             FROM Leads
             WHERE lead_id = @lead_id
         `);
@@ -4581,6 +4613,7 @@ export const getAgentLeads = async (req, res, next) => {
                 L.remark,
                 L.english_proficiency_level,
                 L.income_band_per_month,
+                ${LEAD_CAMPAIGN_SELECT},
                 L.is_connected,
                 L.created_at,
                 L.updated_at
@@ -4684,6 +4717,7 @@ export const searchAgentLeads = async (req, res, next) => {
                 L.updated_at,
                 L.english_proficiency_level,
                 L.income_band_per_month,
+                ${LEAD_CAMPAIGN_SELECT},
                 L.is_connected
             FROM Leads L
             LEFT JOIN LeadStatuses LS
@@ -4824,6 +4858,7 @@ export const filterAgentLeads = async (req, res, next) => {
                 L.remark,
                 L.english_proficiency_level,
                 L.income_band_per_month,
+                ${LEAD_CAMPAIGN_SELECT},
                 L.is_connected,
                 L.created_at,
                 L.updated_at
