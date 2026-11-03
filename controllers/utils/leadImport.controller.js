@@ -7,7 +7,9 @@ import {
     DEFAULT_CAMPAIGN_COUNTRY,
     detectCampaignType,
     normalizeCampaignType,
-    normalizePhone
+    normalizePhone,
+    mergeRebuttals,
+    IGNORED_SHEET_HEADERS
 } from "../../helpers/leadCampaigns.js";
 
 /**
@@ -68,7 +70,6 @@ const HEADER_SYNONYMS = {
     campaign_name: "meta_campaign_name",
 
     nationality: "nationality",
-    tagging: "tagging",
     conditional_question_1: "conditional_question_1",
 
     // Special Healthcare form questions
@@ -109,8 +110,22 @@ const normalizeHeader = (header) => {
  * Builds a { columnIndex -> canonicalField } map from the header row,
  * so each cell is read by what its header says, not by its position.
  */
+/**
+ * Canonical fields whose answer is ALSO kept in Leads.rebuttals (JSON), so new
+ * form questions / sheet columns never need a schema change.
+ */
+const REBUTTAL_FIELDS = new Set([
+    "planned_move_timeline",
+    "language_test_taken",
+    "conditional_question_1",
+    "total_work_experience"
+]);
+
 const buildColumnMap = (headerRow) => {
     const columnMap = {};
+    // { columnIndex -> rebuttal key }: every header that is not a core field and
+    // not explicitly ignored (so brand-new columns are captured automatically)
+    const rebuttalColumns = {};
     const normalizedHeaders = headerRow.map(normalizeHeader);
 
     // "Lead Date" present => any bare "Date"/"Time" columns are call-tracking
@@ -128,9 +143,16 @@ const buildColumnMap = (headerRow) => {
         if (field) {
             columnMap[index] = field;
         }
+
+        if (normalized && !IGNORED_SHEET_HEADERS.has(normalized)) {
+            if (!field || REBUTTAL_FIELDS.has(field)) {
+                // stable key for known questions, header text for new ones
+                rebuttalColumns[index] = field && REBUTTAL_FIELDS.has(field) ? field : normalized;
+            }
+        }
     });
 
-    return columnMap;
+    return { columnMap, rebuttalColumns };
 };
 
 const toTrimmedStringOrNull = (value) => {
@@ -264,7 +286,7 @@ export const importLeadsFromExcel = async (req, res, next) => {
 
         const [headerRow, ...dataRows] = rows;
 
-        const columnMap = buildColumnMap(headerRow);
+        const { columnMap, rebuttalColumns } = buildColumnMap(headerRow);
 
         if (Object.keys(columnMap).length === 0) {
             return res.status(400).json({
@@ -388,8 +410,27 @@ export const importLeadsFromExcel = async (req, res, next) => {
             const normPhone = normalizePhone(rawPhoneNumber);
             const normEmail = email ? email.toLowerCase() : null;
 
+            // Values that live in the lead's child tables
+            // (LeadEducation / LeadWorkExperience / LeadAddresses / LeadPersonalInformation)
+            const education = toTrimmedStringOrNull(fields.education);
+            const jobTitle =
+                toTrimmedStringOrNull(fields.job_title) ||
+                toTrimmedStringOrNull(fields.healthcare_profession);
+            const totalWorkExperience = extractNumber(
+                fields.total_work_experience
+            );
+            const countryOfResidence = toTrimmedStringOrNull(
+                fields.country_of_residence
+            );
+            const nationality = toTrimmedStringOrNull(fields.nationality);
+
             // Values for the campaign columns of this row.
-            const workExperienceText = toTrimmedStringOrNull(fields.total_work_experience);
+            // Everything that is not a core column goes into rebuttals (JSON)
+            const rebuttalAnswers = {};
+            Object.entries(rebuttalColumns).forEach(([index, key]) => {
+                const answer = toTrimmedStringOrNull(rawRow[Number(index)]);
+                if (answer !== null) rebuttalAnswers[key] = answer;
+            });
             const campaignValues = {};
             Object.keys(LEAD_CAMPAIGN_TEXT_FIELDS).forEach((col) => {
                 campaignValues[col] = toTrimmedStringOrNull(fields[col]);
@@ -398,7 +439,6 @@ export const importLeadsFromExcel = async (req, res, next) => {
             campaignValues.campaign_country = sheetCampaignCountry;
             campaignValues.meta_campaign_name =
                 campaignValues.meta_campaign_name ?? sheetCampaignName;
-            campaignValues.total_work_experience_text = workExperienceText;
 
             const leadDate = toDateOrNull(fields.lead_date) || toDateOrNull(fields.created_time);
             const extraValues = {
@@ -408,9 +448,11 @@ export const importLeadsFromExcel = async (req, res, next) => {
                 meta_is_organic: [sql.Bit, toBitOrNull(fields.meta_is_organic)],
                 meta_created_time: [sql.DateTime2, toDateOrNull(fields.created_time)]
             };
+            const newRebuttals = mergeRebuttals(null, rebuttalAnswers);
             const campaignColumns = [
                 ...Object.entries(LEAD_CAMPAIGN_TEXT_FIELDS).map(([col, type]) => [col, type, campaignValues[col]]),
-                ...Object.entries(extraValues).map(([col, [type, value]]) => [col, type, value])
+                ...Object.entries(extraValues).map(([col, [type, value]]) => [col, type, value]),
+                ["rebuttals", sql.NVarChar(sql.MAX), newRebuttals]
             ];
 
             /*
@@ -425,7 +467,7 @@ export const importLeadsFromExcel = async (req, res, next) => {
                     .input("phone", sql.VarChar(15), normPhone)
                     .input("email", sql.NVarChar(150), normEmail)
                     .query(`
-                        SELECT TOP 1 lead_id
+                        SELECT TOP 1 lead_id, rebuttals
                         FROM dbo.Leads
                         WHERE (@meta_lead_id IS NOT NULL AND meta_lead_id = @meta_lead_id)
                            OR (@phone IS NOT NULL AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(
@@ -448,16 +490,63 @@ export const importLeadsFromExcel = async (req, res, next) => {
                     // Fill ONLY empty campaign columns; never touch status, assignment, remarks, etc.
                     try {
                         const upd = pool.request().input("lead_id", sql.Int, existingId);
-                        const sets = campaignColumns.map(([col, type, value]) => {
-                            upd.input(col, type, value);
-                            return `${col} = ISNULL(${col}, @${col})`;
-                        });
+                        const sets = campaignColumns
+                            .filter(([col]) => col !== "rebuttals")
+                            .map(([col, type, value]) => {
+                                upd.input(col, type, value);
+                                return `${col} = ISNULL(${col}, @${col})`;
+                            });
+                        // existing answers win; only missing keys are added
+                        upd.input(
+                            "rebuttals",
+                            sql.NVarChar(sql.MAX),
+                            mergeRebuttals(dupResult.recordset[0].rebuttals, rebuttalAnswers, { overwrite: false })
+                        );
+                        sets.push("rebuttals = @rebuttals");
                         // another lead already owning this Meta id would violate the unique index
                         await upd.query(`
                             UPDATE dbo.Leads
                             SET ${sets.join(", ")}, updated_at = GETDATE()
                             WHERE lead_id = @lead_id
                         `);
+
+                        // Fill child-table rows the lead does not have yet (never overwrites existing rows)
+                        await pool
+                            .request()
+                            .input("lead_id", sql.Int, existingId)
+                            .input("highest_level", sql.NVarChar(sql.MAX), education)
+                            .input("industry_area", sql.NVarChar(255), jobTitle)
+                            .input("years_of_experience", sql.Decimal(10, 2), totalWorkExperience)
+                            .input("country", sql.VarChar(100), countryOfResidence)
+                            .input("nationality", sql.NVarChar(100), nationality)
+                            .query(`
+                                IF @highest_level IS NOT NULL
+                                   AND NOT EXISTS (SELECT 1 FROM LeadEducation WHERE lead_id = @lead_id)
+                                    INSERT INTO LeadEducation (lead_id, highest_level, created_at, updated_at)
+                                    VALUES (@lead_id, @highest_level, GETDATE(), GETDATE());
+
+                                IF (@industry_area IS NOT NULL OR @years_of_experience IS NOT NULL)
+                                   AND NOT EXISTS (SELECT 1 FROM LeadWorkExperience WHERE lead_id = @lead_id)
+                                    INSERT INTO LeadWorkExperience
+                                        (lead_id, industry_area, years_of_experience, noc_code, noc_title, created_at, updated_at)
+                                    VALUES (@lead_id, @industry_area, @years_of_experience, '', '', GETDATE(), GETDATE());
+
+                                IF @country IS NOT NULL
+                                   AND NOT EXISTS (SELECT 1 FROM LeadAddresses WHERE lead_id = @lead_id)
+                                    INSERT INTO LeadAddresses (lead_id, address_type, country, is_primary, created_at, updated_at)
+                                    VALUES (@lead_id, 'Current', @country, 1, GETDATE(), GETDATE());
+
+                                IF @nationality IS NOT NULL
+                                BEGIN
+                                    IF EXISTS (SELECT 1 FROM LeadPersonalInformation WHERE lead_id = @lead_id)
+                                        UPDATE LeadPersonalInformation
+                                        SET nationality = @nationality, updated_at = GETDATE()
+                                        WHERE lead_id = @lead_id AND (nationality IS NULL OR nationality = '');
+                                    ELSE
+                                        INSERT INTO LeadPersonalInformation (lead_id, nationality, created_at, updated_at)
+                                        VALUES (@lead_id, @nationality, GETDATE(), GETDATE());
+                                END
+                            `);
                         updated.push({ row: rowNumber, lead_id: existingId });
                     } catch (updError) {
                         errors.push({ row: rowNumber, reason: updError.message || "Update failed" });
@@ -509,17 +598,6 @@ export const importLeadsFromExcel = async (req, res, next) => {
                 toDateOrNull(fields.created_time) ||
                 toDateOrNull(fields.lead_date) ||
                 new Date();
-
-            const education = toTrimmedStringOrNull(fields.education);
-            const jobTitle =
-                toTrimmedStringOrNull(fields.job_title) ||
-                toTrimmedStringOrNull(fields.healthcare_profession);
-            const totalWorkExperience = extractNumber(
-                fields.total_work_experience
-            );
-            const countryOfResidence = toTrimmedStringOrNull(
-                fields.country_of_residence
-            );
 
             if (leadStatusId === null) {
                 errors.push({
@@ -693,6 +771,26 @@ export const importLeadsFromExcel = async (req, res, next) => {
                                 @address_type,
                                 @country,
                                 @is_primary,
+                                GETDATE(),
+                                GETDATE()
+                            )
+                        `);
+                }
+
+                if (nationality) {
+                    await new sql.Request(transaction)
+                        .input("lead_id", sql.Int, leadId)
+                        .input("nationality", sql.NVarChar(100), nationality)
+                        .query(`
+                            INSERT INTO LeadPersonalInformation (
+                                lead_id,
+                                nationality,
+                                created_at,
+                                updated_at
+                            )
+                            VALUES (
+                                @lead_id,
+                                @nationality,
                                 GETDATE(),
                                 GETDATE()
                             )

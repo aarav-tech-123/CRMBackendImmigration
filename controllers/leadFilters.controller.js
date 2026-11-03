@@ -1,5 +1,5 @@
 import { sql, poolPromise } from "../config/db.js";
-import { LEAD_CAMPAIGN_SELECT, normalizeCampaignType } from "../helpers/leadCampaigns.js";
+import { LEAD_CAMPAIGN_SELECT, normalizeCampaignType, normalizeRebuttalKey, parseRebuttals } from "../helpers/leadCampaigns.js";
 
 /**
  * Query-string values may be repeated or comma separated:
@@ -34,12 +34,8 @@ const EXACT_FILTERS = {
     campaign_type: "L.campaign_type",
     campaign_country: "L.campaign_country",
     platform: "L.meta_platform",
-    tagging: "L.tagging",
-    nationality: "L.nationality",
     english_proficiency_level: "L.english_proficiency_level",
     income_band: "L.income_band_per_month",
-    planned_move_timeline: "L.planned_move_timeline",
-    language_test_taken: "L.language_test_taken",
     source: "L.source",
     center_code: "L.center_code"
 };
@@ -47,13 +43,13 @@ const EXACT_FILTERS = {
 /** Partial-match (LIKE) filters on the Leads table itself */
 const LIKE_FILTERS = {
     campaign_name: "L.meta_campaign_name",
-    form_name: "L.meta_form_name",
-    work_experience: "L.total_work_experience_text"
+    form_name: "L.meta_form_name"
 };
 
 /** Partial-match filters on child tables (EXISTS so a lead is never duplicated) */
 const CHILD_LIKE_FILTERS = {
     country_of_residence: "EXISTS (SELECT 1 FROM LeadAddresses A WHERE A.lead_id = L.lead_id AND A.country LIKE {p})",
+    nationality: "EXISTS (SELECT 1 FROM LeadPersonalInformation P WHERE P.lead_id = L.lead_id AND P.nationality LIKE {p})",
     education: "EXISTS (SELECT 1 FROM LeadEducation E WHERE E.lead_id = L.lead_id AND E.highest_level LIKE {p})",
     job_title: "EXISTS (SELECT 1 FROM LeadWorkExperience W WHERE W.lead_id = L.lead_id AND W.industry_area LIKE {p})"
 };
@@ -102,6 +98,22 @@ const buildLeadFilter = (query, user) => {
         const values = toList(query[param]);
         if (values.length === 0) continue;
         where.push(`(${values.map((v) => template.replace("{p}", bind(sql.NVarChar(255), `%${v}%`))).join(" OR ")})`);
+    }
+
+    // ---- rebuttals (JSON extra answers): ?rb_<question>=value[,value] ----
+    // e.g. rb_nationality=British   rb_planned_move_timeline=3 months
+    // Partial, case-insensitive match; any key works, no code change for new questions.
+    for (const [param, raw] of Object.entries(query)) {
+        if (!param.startsWith("rb_")) continue;
+        const key = normalizeRebuttalKey(param.slice(3));
+        const values = toList(raw);
+        if (!key || values.length === 0) continue;
+        const k = bind(sql.NVarChar(200), key);
+        const likes = values.map((v) => `R.a LIKE ${bind(sql.NVarChar(500), `%${v}%`)}`).join(" OR ");
+        where.push(`EXISTS (
+                    SELECT 1 FROM OPENJSON(L.rebuttals)
+                        WITH (q NVARCHAR(300) '$.question', a NVARCHAR(MAX) '$.answer') R
+                    WHERE REPLACE(LOWER(R.q), '?', '') = ${k} AND (${likes}))`);
     }
 
     // ---- ids ----
@@ -171,10 +183,11 @@ const bindAll = (request, params) => {
  *
  * Campaign: campaign_type (BASIC|SPECIAL_HEALTHCARE|UK), campaign_country, campaign_name,
  *           form_name, platform, is_organic, has_campaign
- * Lead:     lead_status (ids), assigned_to (ids | unassigned), disposition, tagging,
- *           nationality, country_of_residence, education, job_title, work_experience,
- *           income_band, english_proficiency_level, language_test_taken,
- *           planned_move_timeline, source, center_code,
+ * Lead:     lead_status (ids), assigned_to (ids | unassigned), disposition,
+ *           nationality, country_of_residence, education, job_title (child tables),
+ *          
+ *           income_band, english_proficiency_level, source, center_code,
+ *           rb_<question> = any extra answer stored in rebuttals JSON, e.g. rb_planned_move_timeline=3 months,
  *           is_connected, is_converted
  * Dates:    date_from, date_to (YYYY-MM-DD, on lead date)
  * Other:    search, page, limit (max 100), sort_by (created_at|lead_date|full_name|updated_at),
@@ -215,6 +228,7 @@ export const filterLeads = async (req, res) => {
                     L.lead_status, LS.status_name, L.center_code, L.assigned_to, L.is_converted,
                     L.remark, L.english_proficiency_level, L.income_band_per_month, L.is_connected,
                     ${LEAD_CAMPAIGN_SELECT},
+                    L.rebuttals,
                     L.created_at, L.updated_at
                 ${from}
                 ORDER BY ${sortColumn} ${sortOrder}, L.lead_id DESC
@@ -226,7 +240,7 @@ export const filterLeads = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            data: data.recordset,
+            data: data.recordset.map((lead) => ({ ...lead, rebuttals: parseRebuttals(lead.rebuttals) })),
             pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
         });
     } catch (error) {
@@ -238,7 +252,7 @@ export const filterLeads = async (req, res) => {
 /**
  * GET /leads/filter/options
  * Distinct values + counts to fill the filter dropdowns
- * (campaign types, countries, forms, dispositions, tags, nationalities...).
+ * (campaign types, countries, forms, dispositions, nationalities...).
  */
 export const getLeadFilterOptions = async (req, res) => {
     try {
@@ -255,9 +269,7 @@ export const getLeadFilterOptions = async (req, res) => {
             GROUP BY ${column}`;
 
         const columns = [
-            "campaign_type", "campaign_country", "meta_campaign_name", "meta_form_name", "meta_platform",
-            "tagging", "nationality", "english_proficiency_level", "income_band_per_month",
-            "planned_move_timeline", "language_test_taken", "source"
+            "campaign_type", "campaign_country", "meta_campaign_name", "meta_form_name", "meta_platform", "english_proficiency_level", "income_band_per_month", "source"
         ];
 
         const request = pool.request();
@@ -274,6 +286,45 @@ export const getLeadFilterOptions = async (req, res) => {
         result.recordset.forEach(({ field, value, count }) => {
             (options[field] ||= []).push({ value, count });
         });
+
+        // Values that live in child tables (nationality, country of residence, education)
+        const childScope = agentScope.replace(/(assigned_to|center_code)/g, "L.$1");
+        const child = await request.query(`
+            SELECT 'nationality' AS field, P.nationality AS value, COUNT(*) AS count
+              FROM LeadPersonalInformation P JOIN Leads L ON L.lead_id = P.lead_id
+             WHERE ISNULL(L.is_converted, 0) = 0 AND P.nationality IS NOT NULL AND P.nationality <> '' ${childScope}
+             GROUP BY P.nationality
+            UNION ALL
+            SELECT 'country_of_residence', A.country, COUNT(*)
+              FROM LeadAddresses A JOIN Leads L ON L.lead_id = A.lead_id
+             WHERE ISNULL(L.is_converted, 0) = 0 AND A.country IS NOT NULL AND A.country <> '' ${childScope}
+             GROUP BY A.country
+            UNION ALL
+            SELECT 'education', E.highest_level, COUNT(*)
+              FROM LeadEducation E JOIN Leads L ON L.lead_id = E.lead_id
+             WHERE ISNULL(L.is_converted, 0) = 0 AND E.highest_level IS NOT NULL AND LEN(E.highest_level) <= 100 ${childScope}
+             GROUP BY E.highest_level
+            ORDER BY field, count DESC`);
+        child.recordset.forEach(({ field, value, count }) => {
+            (options[field] ||= []).push({ value, count });
+        });
+
+        // Extra answers stored in rebuttals JSON: every question key + its common answers
+        const rb = await request.query(`
+            SELECT REPLACE(LOWER(R.q), '?', '') AS field, R.a AS value, COUNT(*) AS count
+            FROM Leads L
+            CROSS APPLY OPENJSON(L.rebuttals)
+                WITH (q NVARCHAR(300) '$.question', a NVARCHAR(500) '$.answer') R
+            WHERE L.rebuttals IS NOT NULL AND ISNULL(L.is_converted, 0) = 0
+              AND R.a IS NOT NULL AND LEN(R.a) <= 100 ${agentScope.replace(/(assigned_to|center_code)/g, "L.$1")}
+            GROUP BY REPLACE(LOWER(R.q), '?', ''), R.a
+            ORDER BY field, count DESC`);
+
+        const rebuttals = {};
+        rb.recordset.forEach(({ field, value, count }) => {
+            (rebuttals[field] ||= []).push({ value, count });
+        });
+        options.rebuttals = rebuttals;
 
         return res.status(200).json({ success: true, data: options });
     } catch (error) {

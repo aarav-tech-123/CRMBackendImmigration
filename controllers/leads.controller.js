@@ -2,7 +2,7 @@ import { sql, poolPromise } from "../config/db.js";
 import { createActivityLog } from '../helpers/activityLogs.js';
 import { getRequestInfo } from '../helpers/requestInfo.js';
 import { generateCaseNumber } from './utils/caseNumberGenerator.js'
-import { LEAD_CAMPAIGN_SELECT, LEAD_CAMPAIGN_TEXT_FIELDS, normalizeCampaignType } from '../helpers/leadCampaigns.js';
+import { LEAD_CAMPAIGN_SELECT, LEAD_CAMPAIGN_TEXT_FIELDS, normalizeCampaignType, mergeRebuttals, parseRebuttals } from '../helpers/leadCampaigns.js';
 
 
 // ----------------------------------- CONTROLLERS SPECIFIC TO THE SUPER ADMIN ---------START----------------------------------- //
@@ -301,6 +301,14 @@ export const createLead = async (req, res, next) => {
                 : null
         );
         campaignCols.push('lead_date');
+
+        // Flexible extra answers: { "planned_move_timeline": "3 months", ... } or [{question, answer}]
+        request.input(
+            'rebuttals',
+            sql.NVarChar(sql.MAX),
+            mergeRebuttals(null, data.rebuttals)
+        );
+        campaignCols.push('rebuttals');
 
         const insertQuery = `
             INSERT INTO dbo.Leads (
@@ -1526,6 +1534,7 @@ export const getLeadById = async (req, res, next) => {
                     L.income_band_per_month,
                 ${LEAD_CAMPAIGN_SELECT},
                     L.is_connected,
+                    L.rebuttals,
 
                     L.created_at,
                     L.updated_at
@@ -1545,9 +1554,12 @@ export const getLeadById = async (req, res, next) => {
             });
         }
 
+        const lead = result.recordset[0];
+        lead.rebuttals = parseRebuttals(lead.rebuttals);
+
         return res.status(200).json({
             success: true,
-            data: result.recordset[0]
+            data: lead
         });
 
     } catch (error) {
@@ -1628,9 +1640,7 @@ export const updateLead = async (req, res, next) => {
             income_band_per_month: 'Income Band Per Month',
             full_name: 'Full Name',
             campaign_type: 'Campaign Type',
-            campaign_country: 'Campaign Country',
-            nationality: 'Nationality',
-            tagging: 'Tagging'
+            campaign_country: 'Campaign Country'
         };
 
         await transaction.begin();
@@ -1664,6 +1674,7 @@ export const updateLead = async (req, res, next) => {
                 english_proficiency_level,
                 income_band_per_month,
                 full_name,
+                rebuttals,
                 ${Object.keys(LEAD_CAMPAIGN_TEXT_FIELDS).join(', ')}
             FROM Leads
             WHERE lead_id = @lead_id
@@ -1741,6 +1752,22 @@ export const updateLead = async (req, res, next) => {
                 );
 
                 changedFields.push(label);
+            }
+        }
+
+        /*
+         * rebuttals (JSON extra answers): merged by key.
+         * { "planned_move_timeline": "3 months" } sets/updates, { "planned_move_timeline": null } removes.
+         */
+        if (data.rebuttals !== undefined) {
+            const mergedRebuttals = mergeRebuttals(currentLead.rebuttals, data.rebuttals);
+
+            if ((mergedRebuttals ?? '') !== (currentLead.rebuttals ?? '')) {
+                request.input('rebuttals', sql.NVarChar(sql.MAX), mergedRebuttals);
+                updateFields.push('rebuttals = @rebuttals');
+                oldValueParts.push('Additional Info: updated');
+                newValueParts.push('Additional Info: updated');
+                changedFields.push('Additional Info');
             }
         }
 
