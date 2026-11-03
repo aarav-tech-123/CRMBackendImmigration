@@ -43,6 +43,7 @@ import immigrationPipelineRoutes from "./routes/immigrationPipeline.routes.js"
 import immigrationStatsRoutes from "./routes/dashboardStats.routes.js"
 import paymentsRoutes from "./routes/payments.routes.js"
 import emailRoutes from "./routes/email.routes.js"
+import metaLeadsRoutes from "./routes/metaLeads.routes.js"
 import { startEmailSync } from "./services/email/imap.service.js"
 
 import path from "path";
@@ -51,7 +52,8 @@ dotenv.config();
 const app = express();
 
 // app.use(cors());
-app.use(express.json());
+// rawBody is needed to verify Meta's X-Hub-Signature-256 on the webhook
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 
 
@@ -111,6 +113,7 @@ app.use(`${api}/notifications`, notificationRoutes)
 app.use(`${api}/reminders`, reminderRoutes)
 app.use(`${api}/payments`, paymentsRoutes)
 app.use(`${api}/emails`, emailRoutes)
+app.use(`${api}/meta`, metaLeadsRoutes)
 
 
 
