@@ -366,6 +366,13 @@ export const importLeadsFromExcel = async (req, res, next) => {
             String(opt("update_existing") ?? "").toLowerCase()
         );
 
+        // true => for rows matching an existing lead, the Disposition column replaces
+        // that lead's current lead_status (only when the Disposition matches a LeadStatuses name).
+        // Works together with update_existing; without it duplicates are skipped as before.
+        const overwriteStatus = ["true", "1", "yes"].includes(
+            String(opt("overwrite_status") ?? "").toLowerCase()
+        );
+
         const imported = [];
         const updated = [];
         const skipped = [];
@@ -479,7 +486,7 @@ export const importLeadsFromExcel = async (req, res, next) => {
                 if (dupResult.recordset.length > 0) {
                     const existingId = dupResult.recordset[0].lead_id;
 
-                    if (!updateExisting) {
+                    if (!updateExisting && !overwriteStatus) {
                         skipped.push({
                             row: rowNumber,
                             reason: `Duplicate - matches existing lead_id ${existingId} (Meta id / phone / email)`
@@ -490,19 +497,45 @@ export const importLeadsFromExcel = async (req, res, next) => {
                     // Fill ONLY empty campaign columns; never touch status, assignment, remarks, etc.
                     try {
                         const upd = pool.request().input("lead_id", sql.Int, existingId);
-                        const sets = campaignColumns
-                            .filter(([col]) => col !== "rebuttals")
-                            .map(([col, type, value]) => {
-                                upd.input(col, type, value);
-                                return `${col} = ISNULL(${col}, @${col})`;
+                        // overwrite_status: Disposition replaces the current status
+                        const dispText = toTrimmedStringOrNull(fields.disposition);
+                        const newStatusId =
+                            overwriteStatus && dispText
+                                ? statusByName.get(normalizeHeader(dispText)) || null
+                                : null;
+                        if (overwriteStatus && dispText && !newStatusId) {
+                            errors.push({
+                                row: rowNumber,
+                                reason: `Disposition "${dispText}" did not match any LeadStatuses.status_name - status left unchanged`
                             });
-                        // existing answers win; only missing keys are added
-                        upd.input(
-                            "rebuttals",
-                            sql.NVarChar(sql.MAX),
-                            mergeRebuttals(dupResult.recordset[0].rebuttals, rebuttalAnswers, { overwrite: false })
-                        );
-                        sets.push("rebuttals = @rebuttals");
+                        }
+                        const sets = [];
+                        if (updateExisting) {
+                            campaignColumns
+                                .filter(([col]) => col !== "rebuttals")
+                                .forEach(([col, type, value]) => {
+                                    upd.input(col, type, value);
+                                    sets.push(`${col} = ISNULL(${col}, @${col})`);
+                                });
+                            // existing answers win; only missing keys are added
+                            upd.input(
+                                "rebuttals",
+                                sql.NVarChar(sql.MAX),
+                                mergeRebuttals(dupResult.recordset[0].rebuttals, rebuttalAnswers, { overwrite: false })
+                            );
+                            sets.push("rebuttals = @rebuttals");
+                        }
+                        if (newStatusId) {
+                            upd.input("new_status", sql.Int, newStatusId);
+                            sets.push("lead_status = @new_status");
+                        }
+                        if (sets.length === 0) {
+                            skipped.push({
+                                row: rowNumber,
+                                reason: `Duplicate - matches existing lead_id ${existingId}; no Disposition to apply`
+                            });
+                            continue;
+                        }
                         // another lead already owning this Meta id would violate the unique index
                         await upd.query(`
                             UPDATE dbo.Leads
@@ -511,7 +544,7 @@ export const importLeadsFromExcel = async (req, res, next) => {
                         `);
 
                         // Fill child-table rows the lead does not have yet (never overwrites existing rows)
-                        await pool
+                        if (updateExisting) await pool
                             .request()
                             .input("lead_id", sql.Int, existingId)
                             .input("highest_level", sql.NVarChar(sql.MAX), education)
@@ -547,7 +580,11 @@ export const importLeadsFromExcel = async (req, res, next) => {
                                         VALUES (@lead_id, @nationality, GETDATE(), GETDATE());
                                 END
                             `);
-                        updated.push({ row: rowNumber, lead_id: existingId });
+                        updated.push({
+                            row: rowNumber,
+                            lead_id: existingId,
+                            ...(newStatusId ? { lead_status: newStatusId } : {})
+                        });
                     } catch (updError) {
                         errors.push({ row: rowNumber, reason: updError.message || "Update failed" });
                     }
@@ -854,7 +891,8 @@ export const importLeadsFromExcel = async (req, res, next) => {
             campaign: {
                 campaign_type: sheetCampaignType,
                 campaign_country: sheetCampaignCountry,
-                update_existing: updateExisting
+                update_existing: updateExisting,
+                overwrite_status: overwriteStatus
             },
             imported,
             updated,
