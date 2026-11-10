@@ -257,10 +257,12 @@ export const filterLeads = async (req, res) => {
 export const getLeadFilterOptions = async (req, res) => {
     try {
         const pool = await poolPromise;
-        const agentScope =
+        const scopeFor = (alias = "") =>
             req.user?.role === "Agent"
-                ? "AND assigned_to = @user_id AND center_code = @center_code"
+                ? `AND ${alias}assigned_to = @user_id AND ${alias}center_code = @center_code`
                 : "";
+        const agentScope = scopeFor();
+        const childScope = scopeFor("L.");
 
         const dim = (column) => `
             SELECT '${column}' AS field, ${column} AS value, COUNT(*) AS count
@@ -288,7 +290,6 @@ export const getLeadFilterOptions = async (req, res) => {
         });
 
         // Values that live in child tables (nationality, country of residence, education)
-        const childScope = agentScope.replace(/(assigned_to|center_code)/g, "L.$1");
         const child = await request.query(`
             SELECT 'nationality' AS field, P.nationality AS value, COUNT(*) AS count
               FROM LeadPersonalInformation P JOIN Leads L ON L.lead_id = P.lead_id
@@ -316,7 +317,7 @@ export const getLeadFilterOptions = async (req, res) => {
             CROSS APPLY OPENJSON(L.rebuttals)
                 WITH (q NVARCHAR(300) '$.question', a NVARCHAR(500) '$.answer') R
             WHERE L.rebuttals IS NOT NULL AND ISNULL(L.is_converted, 0) = 0
-              AND R.a IS NOT NULL AND LEN(R.a) <= 100 ${agentScope.replace(/(assigned_to|center_code)/g, "L.$1")}
+              AND R.a IS NOT NULL AND LEN(R.a) <= 100 ${childScope}
             GROUP BY REPLACE(LOWER(R.q), '?', ''), R.a
             ORDER BY field, count DESC`);
 
