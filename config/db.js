@@ -6,7 +6,7 @@ dotenv.config();
 const dbConfig = {
   server: process.env.DB_SERVER,
   database: process.env.DB_NAME,
-  port: 27017,
+  // port: 27017,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   options: {
