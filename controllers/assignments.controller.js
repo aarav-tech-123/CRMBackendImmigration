@@ -133,6 +133,8 @@ export const updateLeadAssignment = async (req, res) => {
         WHERE lead_id = @lead_id
       `);
 
+    res.json({ message: "Lead assignment updated successfully!", assignment_id: assignmentId });
+
   } catch (err) {
     console.error("Update Lead Assignment Error:", err);
     res.status(500).json({ message: "Server Error" });

@@ -35,6 +35,13 @@ export const createLead = async (req, res, next) => {
             });
         }
 
+        if (!data.mobile_number || String(data.mobile_number).trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'Mobile number is required'
+            });
+        }
+
         // ============================================================
         // NORMALIZE ASSIGNED USER
         // assigned_to is optional
@@ -108,6 +115,8 @@ export const createLead = async (req, res, next) => {
         // Only check if assigned_to was provided
         // ============================================================
 
+        let assigneeCenterCode = null;
+
         if (assignedTo !== null) {
 
             const userResult = await new sql.Request(transaction)
@@ -117,7 +126,7 @@ export const createLead = async (req, res, next) => {
                     assignedTo
                 )
                 .query(`
-                    SELECT id
+                    SELECT id, center_code
                     FROM dbo.Users
                     WHERE id = @user_id
                 `);
@@ -131,6 +140,8 @@ export const createLead = async (req, res, next) => {
                     message: `Assigned user with ID ${assignedTo} does not exist`
                 });
             }
+
+            assigneeCenterCode = userResult.recordset[0].center_code || null;
         }
 
         // ============================================================
@@ -244,9 +255,9 @@ export const createLead = async (req, res, next) => {
         request.input(
             'center_code',
             sql.NVarChar(50),
-            data.center_code
+            data.center_code && String(data.center_code).trim()
                 ? String(data.center_code).trim()
-                : null
+                : assigneeCenterCode
         );
 
         request.input(
@@ -416,6 +427,21 @@ export const createLead = async (req, res, next) => {
                     updated_at = GETDATE()
                 WHERE lead_id = @lead_id
             `);
+
+        // ============================================================
+        // ASSIGNMENT RECORD (same as assignments/assign)
+        // ============================================================
+
+        if (assignedTo !== null) {
+            await new sql.Request(transaction)
+                .input('lead_id', sql.Int, leadId)
+                .input('assigned_from', sql.Int, req.user?.id || null)
+                .input('assigned_to', sql.Int, assignedTo)
+                .query(`
+                    INSERT INTO LeadAssignments (lead_id, assigned_from, assigned_to, assigned_at)
+                    VALUES (@lead_id, @assigned_from, @assigned_to, GETDATE())
+                `);
+        }
 
         // ============================================================
         // COMMIT TRANSACTION
@@ -2064,18 +2090,6 @@ export const updateLeadStatus = async (req, res, next) => {
         const lead = leadResult.recordset[0];
 
         /*
-         * Check if same status
-         */
-        if (lead.lead_status === leadStatus) {
-            await transaction.rollback();
-
-            return res.status(400).json({
-                success: false,
-                message: 'Lead already has this status'
-            });
-        }
-
-        /*
          * Verify new status exists
          */
         const statusRequest = new sql.Request(transaction);
@@ -2201,7 +2215,9 @@ export const updateLeadStatus = async (req, res, next) => {
         activityRequest.input(
             'description',
             sql.NVarChar(sql.MAX),
-            `Lead ${lead.lead_number || leadId} status changed from ${lead.current_status_name || 'No Status'} to ${newStatus.status_name}`
+            lead.lead_status === leadStatus
+                ? `Lead ${lead.lead_number || leadId} status re-logged as ${newStatus.status_name}`
+                : `Lead ${lead.lead_number || leadId} status changed from ${lead.current_status_name || 'No Status'} to ${newStatus.status_name}`
         );
 
         activityRequest.input(
