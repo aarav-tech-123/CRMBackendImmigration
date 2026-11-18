@@ -35,6 +35,8 @@ import notesRoutes from "./routes/notes.routes.js"
 import followUpRoutes from "./routes/followUp.routes.js"
 import notificationRoutes from "./routes/notification.routes.js"
 import reminderRoutes from "./routes/reminder.routes.js"
+import deviceTokenRoutes from "./routes/deviceToken.routes.js"
+import { startReminderScheduler } from "./services/reminders/reminder.scheduler.js"
 import documentTypeRoutes from "./routes/utils/documentType.routes.js"
 import documentStatusRoutes from "./routes/utils/documentStatus.routes.js"
 import caseDocumentRequirementRoutes from "./routes/caseDocumentRequirement.routes.js"
@@ -111,6 +113,7 @@ app.use(`${api}/notes`, notesRoutes)
 app.use(`${api}/followups`, followUpRoutes)
 app.use(`${api}/notifications`, notificationRoutes)
 app.use(`${api}/reminders`, reminderRoutes)
+app.use(`${api}/device-tokens`, deviceTokenRoutes)
 app.use(`${api}/payments`, paymentsRoutes)
 app.use(`${api}/emails`, emailRoutes)
 app.use(`${api}/meta`, metaLeadsRoutes)
@@ -133,6 +136,7 @@ app.get(`/`, (req, res) => res.send("Immigration CRM Backend Running"));
 
 app.listen(PORT, () => console.log(`Server running on  http://localhost:${PORT}`));
 startEmailSync();
+startReminderScheduler();
 
 
 

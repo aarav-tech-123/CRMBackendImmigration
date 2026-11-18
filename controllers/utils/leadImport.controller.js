@@ -327,6 +327,13 @@ export const importLeadsFromExcel = async (req, res, next) => {
         );
         const defaultStatusId = defaultStatus?.id ?? null;
 
+        /*
+         * Rows with an empty Disposition cell go to the "NA" status.
+         * (If NA hasn't been added to LeadStatuses yet, fall back to the
+         * default status above - see database/lead_status_na.sql.)
+         */
+        const naStatusId = statusByName.get(normalizeHeader("NA")) ?? null;
+
         const usersResult = await pool
             .request()
             .query(`SELECT id, name, email FROM Users`);
@@ -602,16 +609,19 @@ export const importLeadsFromExcel = async (req, res, next) => {
                 ? statusByName.get(normalizeHeader(dispositionText)) || null
                 : null;
 
-            // Leads.lead_status is NOT NULL - fall back to the default status.
-            const leadStatusId = matchedStatusId ?? defaultStatusId;
+            // Leads.lead_status is NOT NULL. Empty disposition -> "NA";
+            // an unrecognised disposition falls back to the default status.
+            const leadStatusId = dispositionText
+                ? (matchedStatusId ?? defaultStatusId)
+                : (naStatusId ?? defaultStatusId);
 
             if (dispositionText && !matchedStatusId) {
                 rowWarnings.push(
                     `Disposition "${dispositionText}" did not match any LeadStatuses.status_name — defaulted to "${defaultStatus?.status_name}"`
                 );
-            } else if (!dispositionText) {
+            } else if (!dispositionText && !naStatusId) {
                 rowWarnings.push(
-                    `Disposition missing — defaulted to "${defaultStatus?.status_name}"`
+                    `Disposition missing and no "NA" status exists — defaulted to "${defaultStatus?.status_name}"`
                 );
             }
 
