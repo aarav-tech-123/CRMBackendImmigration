@@ -181,7 +181,7 @@ const bindAll = (request, params) => {
 /**
  * GET /leads/filter
  *
- * Campaign: campaign_type (BASIC|SPECIAL_HEALTHCARE|UK), campaign_country, campaign_name,
+ * Campaign: campaign_type (BASIC|SPECIAL_HEALTHCARE|UK|CANADA), campaign_country, campaign_name,
  *           form_name, platform, is_organic, has_campaign
  * Lead:     lead_status (ids), assigned_to (ids | unassigned), disposition,
  *           nationality, country_of_residence, education, job_title (child tables),

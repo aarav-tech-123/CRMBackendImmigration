@@ -3,13 +3,15 @@ import { sql } from "../config/db.js";
 export const CAMPAIGN_TYPES = {
     BASIC: "BASIC",                         // Basic Middle East + Basic Healthcare sheet
     SPECIAL_HEALTHCARE: "SPECIAL_HEALTHCARE",
-    UK: "UK"
+    UK: "UK",
+    CANADA: "CANADA"                        // Canada campaign (has a Province answer); pick it explicitly on import
 };
 
 /** Default target market per sheet type (can be overridden on import). */
 export const DEFAULT_CAMPAIGN_COUNTRY = {
     UK: "United Kingdom",
     SPECIAL_HEALTHCARE: "Canada",
+    CANADA: "Canada",
     BASIC: null
 };
 
