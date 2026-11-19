@@ -6,11 +6,12 @@ import { getCaseOrNull, getLeadOrNull, resolveCaseIdForLead } from "../helpers/c
 
 const ELEVATED_ROLES = ["Manager", "SuperAdmin"];
 
-const canSeeAllPrivateNotes = (req) => ELEVATED_ROLES.includes(req.user?.role);
-const canModifyNote = (req, note) => note.user_id === req.user?.id || canSeeAllPrivateNotes(req);
+// Every note is visible to every user who can open the lead/case (there are no
+// private notes). Only the author, Managers and SuperAdmins can edit or delete one.
+const canModifyNote = (req, note) => note.user_id === req.user?.id || ELEVATED_ROLES.includes(req.user?.role);
 
 const NOTE_SELECT = `
-  n.note_id, n.lead_id, n.case_id, n.user_id, n.note_type, n.note, n.is_private,
+  n.note_id, n.lead_id, n.case_id, n.user_id, n.note_type, n.note,
   n.created_at, n.updated_at, u.name AS user_name
 `;
 
@@ -23,7 +24,6 @@ export const getNotesForLead = async (req, res) => {
     return res.status(400).json({ success: false, message: "A valid leadId is required." });
   }
   const { page, pageSize, offset } = paginationParams(req);
-  const seeAllPrivate = canSeeAllPrivateNotes(req);
 
   try {
     const pool = await poolPromise;
@@ -36,9 +36,7 @@ export const getNotesForLead = async (req, res) => {
     const buildRequest = () =>
       pool
         .request()
-        .input("lead_id", sql.Int, leadId)
-        .input("requester_id", sql.Int, req.user.id)
-        .input("see_all_private", sql.Bit, seeAllPrivate ? 1 : 0);
+        .input("lead_id", sql.Int, leadId);
 
     const [dataResult, countResult] = await Promise.all([
       buildRequest()
@@ -49,15 +47,13 @@ export const getNotesForLead = async (req, res) => {
           FROM Notes n
           LEFT JOIN Users u ON u.id = n.user_id
           WHERE n.lead_id = @lead_id
-            AND (n.is_private = 0 OR n.user_id = @requester_id OR @see_all_private = 1)
           ORDER BY n.created_at DESC
           OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
         `),
       buildRequest().query(`
         SELECT COUNT(*) AS total
         FROM Notes n
-        WHERE n.lead_id = @lead_id
-          AND (n.is_private = 0 OR n.user_id = @requester_id OR @see_all_private = 1);
+        WHERE n.lead_id = @lead_id;
       `),
     ]);
 
@@ -84,7 +80,6 @@ export const getNotesForCase = async (req, res) => {
     return res.status(400).json({ success: false, message: "A valid caseId is required." });
   }
   const { page, pageSize, offset } = paginationParams(req);
-  const seeAllPrivate = canSeeAllPrivateNotes(req);
 
   try {
     const pool = await poolPromise;
@@ -97,9 +92,7 @@ export const getNotesForCase = async (req, res) => {
     const buildRequest = () =>
       pool
         .request()
-        .input("case_id", sql.Int, caseId)
-        .input("requester_id", sql.Int, req.user.id)
-        .input("see_all_private", sql.Bit, seeAllPrivate ? 1 : 0);
+        .input("case_id", sql.Int, caseId);
 
     const [dataResult, countResult] = await Promise.all([
       buildRequest()
@@ -110,15 +103,13 @@ export const getNotesForCase = async (req, res) => {
           FROM Notes n
           LEFT JOIN Users u ON u.id = n.user_id
           WHERE n.case_id = @case_id
-            AND (n.is_private = 0 OR n.user_id = @requester_id OR @see_all_private = 1)
           ORDER BY n.created_at DESC
           OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
         `),
       buildRequest().query(`
         SELECT COUNT(*) AS total
         FROM Notes n
-        WHERE n.case_id = @case_id
-          AND (n.is_private = 0 OR n.user_id = @requester_id OR @see_all_private = 1);
+        WHERE n.case_id = @case_id;
       `),
     ]);
 
@@ -149,7 +140,7 @@ export const createNote = async (req, res) => {
     return res.status(400).json({ success: false, message: "A valid leadId is required." });
   }
 
-  const { note, note_type, is_private, case_id } = req.body || {};
+  const { note, note_type, case_id } = req.body || {};
   const userId = req.user?.id;
 
   if (!note || !String(note).trim()) {
@@ -192,11 +183,10 @@ export const createNote = async (req, res) => {
       .input("user_id", sql.Int, userId)
       .input("note_type", sql.VarChar(50), note_type || "General")
       .input("note", sql.NVarChar(sql.MAX), note.trim())
-      .input("is_private", sql.Bit, is_private ? 1 : 0)
       .query(`
         INSERT INTO Notes (lead_id, case_id, user_id, note_type, note, is_private, created_at, updated_at)
         OUTPUT INSERTED.*
-        VALUES (@lead_id, @case_id, @user_id, @note_type, @note, @is_private, GETDATE(), GETDATE())
+        VALUES (@lead_id, @case_id, @user_id, @note_type, @note, 0, GETDATE(), GETDATE())
       `);
     const createdNote = insertResult.recordset[0];
 
@@ -241,7 +231,7 @@ export const updateNote = async (req, res) => {
   if (!noteId) {
     return res.status(400).json({ success: false, message: "A valid noteId is required." });
   }
-  const { note, note_type, is_private } = req.body || {};
+  const { note, note_type } = req.body || {};
   const changedBy = req.user?.id;
 
   let transaction = null;
@@ -272,10 +262,9 @@ export const updateNote = async (req, res) => {
       .input("note_id", sql.Int, noteId)
       .input("note", sql.NVarChar(sql.MAX), note !== undefined ? note.trim() : existingNote.note)
       .input("note_type", sql.VarChar(50), note_type !== undefined ? note_type : existingNote.note_type)
-      .input("is_private", sql.Bit, is_private !== undefined ? (is_private ? 1 : 0) : existingNote.is_private)
       .query(`
         UPDATE Notes
-        SET note = @note, note_type = @note_type, is_private = @is_private, updated_at = GETDATE()
+        SET note = @note, note_type = @note_type, updated_at = GETDATE()
         OUTPUT INSERTED.*
         WHERE note_id = @note_id
       `);
